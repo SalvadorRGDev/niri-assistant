@@ -21,13 +21,18 @@
 - **Superficie de riesgo real:** el asistente **borra y mueve archivos del usuario**
   bajo `~/Proyectos` y `~/Clases` a partir de audio transcrito. Un bug o un
   relajamiento de las validaciones es pérdida de datos personales, no un test rojo.
-- **El repositorio NO está bajo control de versiones** (`git` ausente). No hay
-  `git checkout` de rescate: toda edición destructiva es irreversible.
+- **El repositorio está bajo control de versiones desde 2026-09-04.** Eso hace
+  reversible una edición equivocada, pero **no** los archivos ignorados
+  (`recordings/`, `logs/`, `data/`, `.venv/`): esos siguen sin red de seguridad.
 - **Documentación:** `README.md` es la **única fuente de verdad** (arquitectura,
   seguridad, rendimiento, decisiones técnicas, puesta en marcha y pendientes).
-  `DOCUMENTACION_FINAL.md`, `DOCUMENTACION_FASE1.md`, `README_PENDIENTES.md` y
-  `PLAN_IMPLEMENTACION_SALVADOR.md` quedaron **absorbidos por él y están a la espera
-  de ser borrados** — no los leas como estado actual ni los actualices.
+  **No crees documentos `.md` nuevos** por fase, estado o pendientes: consolidá en
+  `README.md`. Los cuatro documentos anteriores se borraron en el commit
+  "docs: consolidar la documentación en un único README"; si necesitás algo de
+  ellos, están en el historial de git, no en el árbol de trabajo.
+- **El repositorio ahora sí está bajo control de versiones** (`git`, licencia MIT).
+  Antes de cualquier cambio grande, verificá con `git status` que el árbol esté
+  limpio, para que sea reversible.
 
 ---
 
@@ -210,10 +215,11 @@ matchean por prefijo y no pueden expresar "cualquier comando que toque
 `recordings/`". Verificado contra 14 casos (7 que deben bloquearse, 7 que deben
 pasar) el 2026-09-04.
 
-**Ausencia declarada:** no existen skills de despliegue, ni de rollback, ni control
-de versiones. Sin `git`, la única red de seguridad frente a una edición equivocada es
-la prudencia del agente más estas reglas. Si el usuario quiere esa red, `git init` es
-la mejora de mayor impacto disponible.
+**Ausencia declarada:** no existen skills de despliegue ni de rollback automático. El
+control de versiones sí existe desde 2026-09-04, así que un error en código o
+documentación se revierte con `git`. Lo que git **no** cubre son los archivos
+ignorados —`recordings/`, `logs/`, `data/`, `models/piper/`—, que siguen dependiendo
+enteramente de §3.1.3.
 
 ---
 
@@ -305,11 +311,12 @@ Una tarea no está terminada hasta que, **en este orden**:
 - **2026-09-04 — Consolidación de documentación y preparación para GitHub.** Se creó
   `README.md` como fuente de verdad única (absorbe `DOCUMENTACION_FINAL.md`,
   `DOCUMENTACION_FASE1.md`, `README_PENDIENTES.md` y `PLAN_IMPLEMENTACION_SALVADOR.md`,
-  pendientes de borrado) y `.gitignore` que excluye `recordings/`, `logs/`, `data/`,
-  `.venv/` y `*.wav`. Se agregó `RECORDINGS_DIR.mkdir()` en `src/main_loop.py`, que
-  sin eso rompería en un clon limpio al guardar la primera orden. Verificado con
-  `py_compile`. Falta: `git init`, `LICENSE` y despersonalizar `src/paths.py` y
-  `niri.service`.
+  ya borrados) y `.gitignore` que excluye `recordings/`, `logs/`, `data/`, `.venv/` y
+  `*.wav`. Se agregó `RECORDINGS_DIR.mkdir()` en `src/main_loop.py`, que sin eso
+  rompería en un clon limpio al guardar la primera orden. `src/paths.py` y
+  `niri.service` pasaron a `Path.home()` y `%h` para ser portables — verificado que
+  `ALLOWED_ROOTS` resuelve a las mismas dos rutas de antes. Se inicializó `git` con
+  licencia MIT. Pendiente manual: crear el repo en GitHub y hacer `push`.
 - **2026-09-04 — Allowlist de permisos + hook de bloqueo.** Se creó
   `.claude/settings.json` con `allow`/`ask`/`deny` que codifican §3.1/§3.2/§3.3, más un
   hook `PreToolUse` sobre `Bash` que deniega root y borrados sobre `recordings/`,
