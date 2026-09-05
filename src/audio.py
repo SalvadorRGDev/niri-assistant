@@ -1,5 +1,8 @@
+import os
 import queue
 import time
+from contextlib import contextmanager
+
 import sounddevice as sd
 import numpy as np
 from src.config import SAMPLE_RATE, CAPTURE_SAMPLE_RATE, CHANNELS, AUDIO_DEVICE
@@ -17,6 +20,37 @@ _DISPOSITIVOS_DE_SERVIDOR = ("pipewire", "pulse", "sysdefault")
 # solo se cumplen si el micrófono desapareció (desenchufado, o el servidor de
 # sonido lo soltó).
 TIMEOUT_DISPOSITIVO_S = 5.0
+
+
+# Tope del tiempo de espera entre barridos. Sin él, un dispositivo que falla de
+# forma persistente se reintentaría cada 5 s para siempre.
+ESPERA_MAXIMA_S = 60.0
+
+
+@contextmanager
+def _sin_ruido_de_alsa():
+    """
+    Silencia el descriptor 2 mientras PortAudio toca el dispositivo.
+
+    ALSA y PortAudio escriben sus errores directo al fd 2 desde C, sin pasar por
+    `logging`. Un solo `start()` sobre un dispositivo en mal estado llegó a
+    imprimir ~10.000 líneas, que es exactamente el `RateLimitBurst` de journald:
+    el resultado fue que systemd descartó TODOS los logs del servicio, los
+    nuestros incluidos, y el asistente quedó ciego para diagnosticar.
+
+    Nuestro logger escribe a stdout (ver src/logger.py), así que esto no tapa
+    ningún mensaje propio. Aun así, adentro del bloque no se loguea nada: la
+    excepción se guarda y se reporta afuera.
+    """
+    original = os.dup(2)
+    devnull = os.open(os.devnull, os.O_WRONLY)
+    try:
+        os.dup2(devnull, 2)
+        yield
+    finally:
+        os.dup2(original, 2)
+        os.close(devnull)
+        os.close(original)
 
 
 class AudioDeviceUnavailable(RuntimeError):
@@ -135,21 +169,33 @@ class AudioStream:
 
     def _abrir(self, dispositivo) -> bool:
         """Intenta abrir un dispositivo concreto. True si quedó andando."""
-        try:
-            # check_input_settings valida sin abrir el stream. Se hace primero
-            # porque abrir un dispositivo inválido puede tumbar el proceso entero.
-            sd.check_input_settings(device=dispositivo, samplerate=CAPTURE_SAMPLE_RATE,
-                                     channels=CHANNELS, dtype="int16")
-            stream = sd.InputStream(
-                device=dispositivo,
-                samplerate=CAPTURE_SAMPLE_RATE,
-                channels=CHANNELS,
-                dtype="int16",
-                callback=self.callback,
-            )
-            stream.start()
-        except Exception as e:
-            logger.debug(f"Descartado {_descripcion(dispositivo)}: {str(e).splitlines()[0]}")
+        stream, error = None, None
+        with _sin_ruido_de_alsa():
+            try:
+                # check_input_settings valida sin abrir el stream. Se hace primero
+                # porque abrir un dispositivo inválido puede tumbar el proceso entero.
+                sd.check_input_settings(device=dispositivo, samplerate=CAPTURE_SAMPLE_RATE,
+                                         channels=CHANNELS, dtype="int16")
+                stream = sd.InputStream(
+                    device=dispositivo,
+                    samplerate=CAPTURE_SAMPLE_RATE,
+                    channels=CHANNELS,
+                    dtype="int16",
+                    callback=self.callback,
+                )
+                stream.start()
+            except Exception as e:
+                error = e
+                if stream is not None:
+                    # El stream se creó pero no arrancó: cerrarlo o queda colgado.
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+                    stream = None
+
+        if error is not None:
+            logger.debug(f"Descartado {_descripcion(dispositivo)}: {str(error).splitlines()[0]}")
             return False
 
         self.stream = stream
@@ -167,6 +213,7 @@ class AudioStream:
         pocos segundos (visto en producción al desconectar el micrófono USB).
         """
         aviso_emitido = False
+        espera = intervalo_espera
         while True:
             for dispositivo in _candidatos(self.preferido):
                 if self._abrir(dispositivo):
@@ -185,9 +232,12 @@ class AudioStream:
                 aviso_emitido = True
                 logger.warning(
                     "No encontré ningún micrófono utilizable. Esperando a que "
-                    f"aparezca uno (reintento cada {intervalo_espera:.0f}s)."
+                    "aparezca uno."
                 )
-            time.sleep(intervalo_espera)
+            time.sleep(espera)
+            # Backoff: un micrófono que no vuelve no justifica barrer los
+            # dispositivos cada 5 s indefinidamente.
+            espera = min(espera * 2, ESPERA_MAXIMA_S)
 
     def reset_buffers(self):
         """

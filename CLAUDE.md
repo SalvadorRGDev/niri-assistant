@@ -298,7 +298,10 @@ Una tarea no está terminada hasta que, **en este orden**:
   el servicio moría y `Restart=on-failure` lo convertía en un bucle que recargaba
   Whisper cada 12 s. Además, sondear dispositivos ALSA abriéndolos hace
   **segfaultear** a PortAudio con los plugins (`lavrate`, `upmix`…): usar
-  `sd.check_input_settings()` y filtrar a los que tienen `(hw:` en el nombre.
+  `sd.check_input_settings()` y filtrar a los que tienen `(hw:` en el nombre. Y un
+  `start()` fallido imprime ~10.000 líneas al **fd 2 desde C**, justo el
+  `RateLimitBurst` de journald: sin silenciar ese descriptor, systemd descarta todos
+  los logs del servicio y te deja sin diagnóstico.
 
 - **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
   Con Ollama apagado, `test_pipeline.py` no falla: el NLU devuelve `action='ninguna'`

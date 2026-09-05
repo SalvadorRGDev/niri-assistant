@@ -12,7 +12,9 @@ sin morir cuando no hay ninguno.
 
 Uso:  .venv/bin/python eval/test_audio.py     (código de salida 1 si algo falla)
 """
+import os
 import queue
+import subprocess
 import sys
 import time
 from pathlib import Path
@@ -164,6 +166,54 @@ def probar_perdida_en_caliente():
         audio_mod.TIMEOUT_DISPOSITIVO_S = original
 
 
+def probar_silencio_de_alsa():
+    print("\nEl ruido de PortAudio no puede inundar el journal")
+    leer, escribir = os.pipe()
+    original = os.dup(2)
+    try:
+        os.dup2(escribir, 2)
+        with audio_mod._sin_ruido_de_alsa():
+            os.write(2, b"esto no tiene que aparecer\n")
+        os.write(2, b"esto si\n")
+    finally:
+        os.dup2(original, 2)
+        os.close(original)
+        os.close(escribir)
+    salida = os.read(leer, 4096)
+    os.close(leer)
+    verificar("lo escrito al fd 2 dentro del bloque se descarta",
+              b"no tiene que aparecer" not in salida, f"salida={salida!r}")
+    verificar("el fd 2 queda restaurado al salir", b"esto si" in salida, f"salida={salida!r}")
+
+    # Abrir un dispositivo inexistente es el camino que imprimía ~10.000 líneas.
+    guion = (
+        "import sys; sys.path.insert(0, %r)\n"
+        "from src.audio import AudioStream\n"
+        "AudioStream()._abrir(99999)\n"
+    ) % str(BASE_DIR)
+    proceso = subprocess.run([sys.executable, "-c", guion], capture_output=True, timeout=60)
+    lineas = len(proceso.stderr.decode(errors="replace").splitlines())
+    verificar("abrir un dispositivo inválido no escribe nada en stderr", lineas == 0,
+              f"escribió {lineas} líneas")
+
+
+def probar_backoff():
+    print("\nLa espera crece en vez de barrer cada 5 s para siempre")
+    esperas = []
+    original_sleep, original_abrir = audio_mod.time.sleep, audio_mod.AudioStream._abrir
+    audio_mod.time.sleep = esperas.append
+    audio_mod.AudioStream._abrir = lambda self, d: len(esperas) >= 4
+    try:
+        audio_mod.AudioStream().start(esperar=True, intervalo_espera=5.0)
+    finally:
+        audio_mod.time.sleep = original_sleep
+        audio_mod.AudioStream._abrir = original_abrir
+    verificar("cada reintento espera el doble que el anterior",
+              esperas == [5.0, 10.0, 20.0, 40.0], f"esperó {esperas}")
+    verificar("el tope está en ESPERA_MAXIMA_S",
+              audio_mod.ESPERA_MAXIMA_S == 60.0 and max(esperas) <= audio_mod.ESPERA_MAXIMA_S)
+
+
 def main() -> int:
     print("Pruebas de entrada de audio — ninguna abre el micrófono real")
     probar_orden_de_candidatos()
@@ -171,6 +221,8 @@ def main() -> int:
     probar_descarte_y_fallback()
     probar_sin_dispositivos()
     probar_perdida_en_caliente()
+    probar_silencio_de_alsa()
+    probar_backoff()
     print(f"\n{len(_fallos)} fallos de {_corridas} verificaciones")
     for f in _fallos:
         print(f"  {ROJO}-{FIN} {f}")
