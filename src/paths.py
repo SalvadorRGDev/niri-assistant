@@ -42,6 +42,31 @@ def _normalize(text: str) -> str:
     )
 
 
+def _real_child_name(parent: Path, spoken: str) -> str:
+    """
+    Traduce un nombre de carpeta *hablado* (que llega siempre normalizado a
+    minúsculas y sin acentos) al nombre real en disco.
+
+    Existe porque `_normalize` destruye las mayúsculas y los acentos del nombre
+    dicho, y en un sistema de archivos sensible a mayúsculas eso construye una
+    ruta que no existe: "en Proyectos, carpeta Asistente" apuntaba a
+    `~/Proyectos/asistente` en vez de `~/Proyectos/Asistente`. En `crear_carpeta`
+    eso creaba un duplicado en minúscula al lado de la carpeta verdadera.
+
+    Si ningún hijo de `parent` coincide, devuelve el nombre hablado tal cual:
+    es el caso legítimo de crear una carpeta que todavía no existe.
+    """
+    try:
+        for child in parent.iterdir():
+            if _normalize(child.name) == spoken:
+                return child.name
+    except OSError:
+        # parent no existe todavía, o no se puede leer: no hay nada que
+        # traducir, y el nombre hablado es la mejor respuesta disponible.
+        pass
+    return spoken
+
+
 def parse_location_speech(text: Optional[str]) -> Optional[Path]:
     """
     Interpreta una frase (respuesta hablada, o el campo `ruta_base`/`destino`
@@ -54,6 +79,11 @@ def parse_location_speech(text: Optional[str]) -> Optional[Path]:
       "Proyectos, carpeta trabajo"        -> ~/Proyectos/trabajo
       "la carpeta fotos" (sin raíz)       -> None (ambiguo, hay que preguntar)
       ""  /  None                         -> None
+
+    Si la subcarpeta dicha ya existe en disco, se devuelve con su nombre real
+    (mayúsculas y acentos incluidos): "Proyectos, carpeta asistente" resuelve a
+    ~/Proyectos/Asistente. Si no existe, se conserva el nombre tal como se dijo,
+    que es lo que permite crearla.
     """
     if not text:
         return None
@@ -64,9 +94,17 @@ def parse_location_speech(text: Optional[str]) -> Optional[Path]:
     for alias, root in ROOT_ALIASES:
         if alias in words:
             remainder = [w for w in words if w != alias and w not in _STOPWORDS]
-            if remainder:
-                return root.joinpath(*remainder)
-            return root
+            if not remainder:
+                return root
+            # Ningún segmento hablado puede contener separadores ni ser "."/"..".
+            # El ejecutor igual lo rechazaría con is_safe_path(), pero no tiene
+            # sentido construir una ruta de escape para que la validen abajo.
+            if any("/" in w or "\\" in w or w in (".", "..") for w in remainder):
+                return None
+            path = root
+            for part in remainder:
+                path = path / _real_child_name(path, part)
+            return path
     return None
 
 

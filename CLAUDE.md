@@ -308,6 +308,15 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 <!-- AAAA-MM-DD — qué cambió — archivos — cómo se verificó. Máx. ~20 líneas. -->
 
+- **2026-09-04 — Fix de nombres reales de carpeta en `src/paths.py`.**
+  `parse_location_speech` devolvía la subcarpeta dicha en minúsculas y sin acentos,
+  así que en un sistema sensible a mayúsculas resolvía a una ruta inexistente y
+  `crear_carpeta` generaba un duplicado al lado de la carpeta real. Ahora cada
+  segmento se traduce al nombre en disco (`_real_child_name`) y se conserva el nombre
+  hablado solo si no existe, que es el caso de creación. Se agregó además un rechazo
+  de segmentos con separadores o `..` (defensa en profundidad: `is_safe_path` ya los
+  atrapaba). Verificado con 17 casos, incluidos anidamiento, acentos, y las
+  regresiones de whitelist y traversal.
 - **2026-09-04 — Consolidación de documentación y preparación para GitHub.** Se creó
   `README.md` como fuente de verdad única (absorbe `DOCUMENTACION_FINAL.md`,
   `DOCUMENTACION_FASE1.md`, `README_PENDIENTES.md` y `PLAN_IMPLEMENTACION_SALVADOR.md`,
