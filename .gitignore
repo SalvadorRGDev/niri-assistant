@@ -1,0 +1,20 @@
+# Entorno de Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Datos personales generados en tiempo de ejecución — NUNCA publicar.
+# Contienen la voz real del usuario, las transcripciones de todo lo dicho
+# frente al micrófono, y sus notas y recordatorios.
+recordings/
+logs/
+data/
+*.wav
+
+# Modelos descargados por el usuario (voces de Piper)
+models/piper/
+
+# Artefactos de sesión y basura de herramientas
+:memory:*
+.claude/settings.local.json
+.claude/scheduled_tasks.lock

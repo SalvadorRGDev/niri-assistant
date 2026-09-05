@@ -1,0 +1,35 @@
+[Unit]
+Description=Asistente de Voz Niri (Ollama + Whisper)
+After=network.target ollama.service sound.target
+Requires=sound.target
+
+[Service]
+Type=simple
+# %h lo expande systemd al home del usuario que corre la unidad, así que el
+# archivo funciona tal cual en cualquier cuenta. Si clonaste el proyecto en
+# otra ruta, cambiá "Proyectos/Asistente" por la tuya.
+WorkingDirectory=%h/Proyectos/Asistente
+ExecStart=%h/Proyectos/Asistente/.venv/bin/python main.py
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+# CPUWeight baja prioridad relativa: si el laptop está bajo carga (video,
+# compilar, juegos), el scheduler favorece esos procesos sobre este. Si el
+# laptop está ocioso (el caso común para un asistente en background), el
+# servicio puede usar los núcleos que necesite sin este límite estorbando.
+CPUWeight=20
+# CPUQuota como techo de seguridad (evita que Whisper/onnxruntime acaparen
+# los 16 núcleos y disparen ventiladores/batería), pero generoso para no
+# volver a throttlear en medio de un ciclo de audio en tiempo real (ver
+# incidente: CPUQuota=25% causaba nr_throttled altísimo y por eso el VAD
+# "no detectaba" al usuario aunque el wake word sí disparaba).
+CPUQuota=300%
+MemoryMax=2G
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=%h/Proyectos %h/Clases /tmp
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target

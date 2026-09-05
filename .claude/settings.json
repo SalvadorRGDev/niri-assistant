@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Read",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(grep *)",
+      "Bash(rg *)",
+      "Bash(find *)",
+      "Bash(stat *)",
+      "Bash(file *)",
+      "Bash(du *)",
+      "Bash(df *)",
+      "Bash(which *)",
+      "Bash(sed -n *)",
+      "Bash(jq *)",
+      "Bash(free *)",
+      "Bash(nvidia-smi *)",
+      "Bash(nvidia-smi)",
+      "Bash(systemctl --user *)",
+      "Bash(journalctl *)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/python -V)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/python main.py)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/python test_pipeline.py *)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/python test_phase1.py)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/python test_mic_vad.py)",
+      "Edit(main.py)",
+      "Edit(src/audio.py)",
+      "Edit(src/vad.py)",
+      "Edit(src/wake_word.py)",
+      "Edit(src/stt.py)",
+      "Edit(src/tts.py)",
+      "Edit(src/nlu.py)",
+      "Edit(src/main_loop.py)",
+      "Edit(src/logger.py)",
+      "Edit(src/audit.py)",
+      "Edit(src/actions/**)",
+      "Edit(test_*.py)",
+      "Edit(*.md)"
+    ],
+    "ask": [
+      "Edit(src/config.py)",
+      "Edit(src/executor.py)",
+      "Edit(src/paths.py)",
+      "Edit(src/confirm.py)",
+      "Edit(src/schemas.py)",
+      "Edit(src/app_registry.py)",
+      "Edit(requirements.txt)",
+      "Edit(niri.service)",
+      "Edit(.claude/settings.json)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/python -m pip *)",
+      "Bash(/home/salvadorrg/Proyectos/Asistente/.venv/bin/pip *)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(doas *)",
+      "Bash(pacman *)",
+      "Bash(yay *)",
+      "Bash(paru *)",
+      "Bash(rm *)",
+      "Bash(rmdir *)",
+      "Bash(shred *)",
+      "Bash(truncate *)",
+      "Bash(dd *)",
+      "Edit(recordings/**)",
+      "Edit(logs/**)",
+      "Edit(data/**)",
+      "Edit(models/**)",
+      "Edit(.venv/**)"
+    ]
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "jq -r '.tool_input.command // \"\"' | grep -Eq '(^|[;&|(]|[[:space:]])(sudo|doas|pacman|yay|paru)([[:space:]]|$)|(^|[;&|(]|[[:space:]])(rm|rmdir|shred|truncate|dd|mv)[[:space:]][^;&|]*(recordings|logs|data|models|\\.venv)[/[:space:]]' && echo '{\"hookSpecificOutput\":{\"hookEventName\":\"PreToolUse\",\"permissionDecision\":\"deny\",\"permissionDecisionReason\":\"Bloqueado por CLAUDE.md 3.1: privilegios de root, o borrado/movimiento de datos irreproducibles (recordings/, logs/, data/, models/, .venv/).\"}}' || exit 0",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}
