@@ -23,6 +23,18 @@ _MPRIS_METHODS = {
     "anterior": "Previous",
 }
 
+# El NLU no siempre usa el vocabulario exacto del prompt: el banco de evaluación
+# mostró que a "apagá la música" le pone cantidad="apagar", que no es ninguno de
+# los métodos de arriba, y Niri terminaba repreguntando en vez de pausar. Estos
+# alias absorben las formas habituales antes de buscar el método MPRIS.
+_ALIAS_CANTIDAD = {
+    "apagar": "pausar", "apaga": "pausar", "apagá": "pausar",
+    "parar": "pausar", "para": "pausar", "pará": "pausar", "pausa": "pausar",
+    "detener": "pausar", "detene": "pausar", "stop": "pausar",
+    "play": "reproducir", "reanudar": "reproducir", "continuar": "reproducir",
+    "seguir": "reproducir", "segui": "reproducir",
+}
+
 
 def _find_mpris_player(conn) -> str:
     msg = new_method_call(_DBUS_ADDR, "ListNames")
@@ -36,6 +48,7 @@ def _find_mpris_player(conn) -> str:
 
 def control_musica(action: FileAction) -> ExecutionResult:
     cantidad = (action.cantidad or "").strip().lower()
+    cantidad = _ALIAS_CANTIDAD.get(cantidad, cantidad)
     method = _MPRIS_METHODS.get(cantidad)
     if method is None:
         return ExecutionResult(text="¿Querés que reproduzca, pause, o pase a la siguiente/anterior canción?")

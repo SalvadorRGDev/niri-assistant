@@ -285,6 +285,21 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 <!-- Hechos técnicos verificados. Formato: AAAA-MM-DD — hecho — porqué importa. -->
 
+- **2026-09-05 — En el NLU el costo está en la salida, y la ventana se llena en
+  silencio.** El prefill es casi gratis con la cache de prefijo caliente (3823 tokens
+  en 0.05 s) y caro en frío (1.75 s), mientras que cada token generado cuesta ~15 ms.
+  Por eso se borraron las claves nulas de los ejemplos: salida de 36 a 17 tokens y
+  p50 de 662 a 310 ms sin perder exactitud. Al crecer el prompt, ojo: si no entra en
+  `num_ctx`, Ollama lo trunca por el principio **sin ningún error visible**. Hoy son
+  3245 de 5120 tokens y `src/nlu.py` avisa al arrancar si el margen baja del 25%.
+- **2026-09-05 — El micrófono no es un dispositivo fijo y el `default` puede no
+  existir.** Al desconectar el micrófono USB, PipeWire se quedó sin ninguna fuente
+  de audio y el `default` del sistema dejó de abrir (`PaErrorCode -9999` / ALSA -2):
+  el servicio moría y `Restart=on-failure` lo convertía en un bucle que recargaba
+  Whisper cada 12 s. Además, sondear dispositivos ALSA abriéndolos hace
+  **segfaultear** a PortAudio con los plugins (`lavrate`, `upmix`…): usar
+  `sd.check_input_settings()` y filtrar a los que tienen `(hw:` en el nombre.
+
 - **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
   Con Ollama apagado, `test_pipeline.py` no falla: el NLU devuelve `action='ninguna'`
   y el asistente responde "No entendí la acción", que parece un problema de
@@ -297,53 +312,27 @@ Una tarea no está terminada hasta que, **en este orden**:
 - **2026-09-04 — Python del proyecto es 3.14**, lo que descarta wheels de
   `tflite-runtime` y TensorFlow. Por eso el wake word corre con `onnxruntime`
   (`OnnxClassifier` en `src/wake_word.py`) y no con la ruta oficial de openWakeWord.
-- **2026-09-03 — El micrófono es de acceso exclusivo:** con `niri.service` activo,
-  cualquier prueba manual de audio falla o roba el dispositivo. Siempre verificar el
-  estado del servicio antes.
-- **2026-09-03 — `AUDIO_GAIN` solo afecta al VAD, no al STT**, y está bien así:
-  Whisper usa log-mel, invariante a la amplitud; Silero sí es sensible al nivel.
-  Los errores de transcripción no se arreglan subiendo volumen.
-- **2026-09-03 — El paquete `ollama` de Arch es solo-CPU.** La GPU requiere
-  `ollama-vulkan`; se eligió sobre `ollama-cuda` porque CUDA arrastra ~4.7 GB en disco
-  para una ganancia marginal en esta tarjeta de 4 GB.
-- **2026-09-03 — `CPUQuota` demasiado bajo rompe el VAD:** con `25%` el cgroup
-  throttleaba en pleno ciclo de audio y el asistente "no escuchaba" pese a disparar el
-  wake word. Valor actual: `300%` con `CPUWeight=20`.
+- **2026-09-03 — Micrófono de acceso exclusivo, `AUDIO_GAIN` solo para el VAD, y
+  `CPUQuota` bajo rompiendo el VAD:** los tres están explicados en detalle en
+  `README.md` > Decisiones técnicas. Se sacaron de acá para no pagarlos dos veces.
 
 ## Historial de Cambios Recientes
 
 <!-- AAAA-MM-DD — qué cambió — archivos — cómo se verificó. Máx. ~20 líneas. -->
 
-- **2026-09-04 — Fix de nombres reales de carpeta en `src/paths.py`.**
-  `parse_location_speech` devolvía la subcarpeta dicha en minúsculas y sin acentos,
-  así que en un sistema sensible a mayúsculas resolvía a una ruta inexistente y
-  `crear_carpeta` generaba un duplicado al lado de la carpeta real. Ahora cada
-  segmento se traduce al nombre en disco (`_real_child_name`) y se conserva el nombre
-  hablado solo si no existe, que es el caso de creación. Se agregó además un rechazo
-  de segmentos con separadores o `..` (defensa en profundidad: `is_safe_path` ya los
-  atrapaba). Verificado con 17 casos, incluidos anidamiento, acentos, y las
-  regresiones de whitelist y traversal.
-- **2026-09-04 — Consolidación de documentación y preparación para GitHub.** Se creó
-  `README.md` como fuente de verdad única (absorbe `DOCUMENTACION_FINAL.md`,
-  `DOCUMENTACION_FASE1.md`, `README_PENDIENTES.md` y `PLAN_IMPLEMENTACION_SALVADOR.md`,
-  ya borrados) y `.gitignore` que excluye `recordings/`, `logs/`, `data/`, `.venv/` y
-  `*.wav`. Se agregó `RECORDINGS_DIR.mkdir()` en `src/main_loop.py`, que sin eso
-  rompería en un clon limpio al guardar la primera orden. `src/paths.py` y
-  `niri.service` pasaron a `Path.home()` y `%h` para ser portables — verificado que
-  `ALLOWED_ROOTS` resuelve a las mismas dos rutas de antes. Se inicializó `git` con
-  licencia MIT. Pendiente manual: crear el repo en GitHub y hacer `push`.
-- **2026-09-04 — Allowlist de permisos + hook de bloqueo.** Se creó
-  `.claude/settings.json` con `allow`/`ask`/`deny` que codifican §3.1/§3.2/§3.3, más un
-  hook `PreToolUse` sobre `Bash` que deniega root y borrados sobre `recordings/`,
-  `logs/`, `data/`, `models/` y `.venv/`. Cierra el hallazgo de la auditoría v2 sobre
-  reglas que solo existían como texto. Verificado con 14 casos (7 bloqueos, 7
-  permisos) sin falsos positivos, y `jq -e` sobre el archivo.
-
-- **2026-09-04 — Reescritura del harness (v2).** Auditoría de constraints/skills/memoria
-  sobre la v1: se agregó el contexto del proyecto, se reemplazaron los comandos ficticios
-  (`npm`/`cargo`/`black`/`pytest`) por los verificados del venv, se formalizaron
-  prohibiciones absolutas y zona de confirmación, se declararon los invariantes de
-  seguridad del producto, se documentó la ausencia de skills propias y de `git`, y se
-  crearon las secciones de memoria que el protocolo anterior referenciaba sin que
-  existieran. Archivo: `CLAUDE.md`. Verificado: comandos de §2 comprobados contra el
-  sistema (`.venv/bin/python -V` → 3.14.7; `npm`/`black`/`pytest` ausentes).
+- **2026-09-05 — Fase 0: banco de evaluación, métricas y las correcciones que
+  encontró.** Nuevos: `eval/casos.jsonl` (66 órdenes con su `FileAction` esperado),
+  `eval/run.py` (compara contra `eval/resultados/baseline.json`, código 1 si hay
+  regresiones), `eval/test_seguridad.py` (46 checks de §4), `eval/test_audio.py`
+  (17), `src/metrics.py` (`logs/metrics.jsonl`, tiempos por etapa, sin transcripciones)
+  y `eval/resumen_metricas.py`. El banco destapó 7 fallos invisibles para el set de 12
+  casos: `crear_archivo` nunca se disparaba, "apagá el wifi" lo PRENDÍA y "apagá el
+  bluetooth" llegaba a `systemctl poweroff` sin confirmar. Arreglados en capas
+  (corrección determinista en `nlu.py`, confirmación por voz para `energia` y
+  auditoría de las acciones no-archivo en `dispatch.py`, `temperature=0`), más la
+  elección de dispositivo de entrada en `audio.py`. **65/66, p50 de 662 a 310 ms.**
+  Verificado con las tres suites, `test_pipeline.py` y el servicio sin errores.
+- **Anterior a 2026-09-05:** fix de nombres reales de carpeta en `src/paths.py`,
+  consolidación de la documentación en `README.md`, puesta bajo git con licencia MIT
+  y harness v2 con `.claude/settings.json`. El detalle está en `git log` (§6.7).
+  Pendiente manual: crear el repo en GitHub y hacer `push`.

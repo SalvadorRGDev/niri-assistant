@@ -29,9 +29,20 @@ def _run(argv: list, timeout: float = 5.0) -> bool:
 
 
 def _direction(cantidad: str) -> str:
-    """Normaliza 'cantidad' a 'subir'/'bajar'/'silenciar', default 'subir'."""
+    """
+    Normaliza 'cantidad' a 'subir'/'bajar'/'silenciar', default 'subir'.
+
+    El default 'subir' existe porque para volumen y brillo el prompt del NLU
+    pide asumir esa dirección cuando el usuario no la dice. Pero ese mismo
+    default era un bug en wifi y bluetooth: el banco de evaluación mostró que
+    a "apagá el wifi" el NLU le pone a veces cantidad="apagar" en vez de
+    "bajar", y sin las formas de apagar listadas abajo eso caía en 'subir' y
+    PRENDÍA justo lo que se pedía apagar. Se reconocen acá en vez de confiar
+    en que el modelo respete el vocabulario del prompt.
+    """
     c = (cantidad or "").strip().lower()
-    if any(w in c for w in ("baj", "-", "menos", "reduc")):
+    if any(w in c for w in ("baj", "-", "menos", "reduc",
+                             "apag", "desconect", "desactiv")):
         return "bajar"
     if any(w in c for w in ("silenci", "mute", "mut")):
         return "silenciar"
@@ -98,9 +109,21 @@ _ENERGIA_ALIASES = {
 }
 
 
+def normalizar_energia(cantidad) -> str | None:
+    """
+    Traduce la 'cantidad' hablada a 'suspender'/'apagar'/'reiniciar', o None si
+    no se reconoce.
+
+    Es pública porque src/actions/dispatch.py necesita saber QUÉ va a pasar
+    antes de que pase, para poder pedir la confirmación por voz nombrando la
+    operación concreta. Sin esto, la confirmación tendría que ser genérica o
+    duplicar este mapa.
+    """
+    return _ENERGIA_ALIASES.get((cantidad or "").strip().lower())
+
+
 def energia(action: FileAction) -> ExecutionResult:
-    c = (action.cantidad or "").strip().lower()
-    accion = _ENERGIA_ALIASES.get(c)
+    accion = normalizar_energia(action.cantidad)
     if accion is None:
         return ExecutionResult(text="¿Querés que suspenda, apague o reinicie el equipo?")
 

@@ -5,7 +5,10 @@ Executor (src/executor.py) sigue siendo exclusivamente para archivos —
 estas acciones no tienen `base_dir`/`is_safe_path`, así que viven en un
 dispatcher separado para no mezclar los dos modelos de seguridad.
 """
+from typing import Optional
+
 from src.schemas import FileAction, ExecutionResult
+from src.audit import log_action
 from src.logger import get_logger
 from src.actions import apps as apps_actions
 from src.actions import system as system_actions
@@ -15,6 +18,22 @@ from src.actions import media as media_actions
 from src.actions import time_actions
 
 logger = get_logger("Actions.Dispatch")
+
+# Acciones que no tocan archivos pero SÍ son irreversibles: exigen la misma
+# confirmación por voz que 'eliminar' y 'mover' en el Executor (§4.4 del harness).
+#
+# 'energia' está acá por un hallazgo del banco de evaluación: a "apagá el
+# bluetooth" el NLU le contestaba {"action": "energia", "cantidad": "apagar"},
+# que llegaba directo a `systemctl poweroff` sin preguntar nada. El prompt ya
+# advertía en mayúsculas que no confundiera bluetooth con energía y el modelo lo
+# hizo igual — de ahí que la defensa no pueda vivir solo en el prompt.
+CONFIRMATION_REQUIRED = {"energia"}
+
+_PREGUNTAS_ENERGIA = {
+    "suspender": "¿Confirmás que suspenda el equipo?",
+    "apagar": "¿Confirmás que apague la computadora?",
+    "reiniciar": "¿Confirmás que reinicie la computadora?",
+}
 
 # Acciones que MainLoop debe rutear acá en vez de a Executor.
 # Se va completando a medida que se implementa cada fase del plan.
@@ -52,9 +71,66 @@ _HANDLERS = {
 }
 
 
-def dispatch(action: FileAction) -> ExecutionResult:
+def _pregunta_de_confirmacion(action: FileAction) -> Optional[str]:
+    """
+    Devuelve la pregunta a hacer antes de ejecutar, o None si no hace falta.
+
+    Está guiada por CONFIRMATION_REQUIRED y no por una lista de acciones escrita
+    acá adentro: agregar una acción al conjunto tiene que bastar para que quede
+    protegida. Si alguna vez se agrega una sin pregunta propia, se confirma igual
+    con una genérica — el default es preguntar, nunca ejecutar.
+
+    El único None con acción marcada es cuando todavía no se sabe QUÉ haría (la
+    'cantidad' no se reconoce): ahí el handler repregunta por su cuenta y no
+    ejecuta nada, así que confirmar sería pedir dos veces lo mismo.
+    """
+    if action.action not in CONFIRMATION_REQUIRED:
+        return None
+
+    if action.action == "energia":
+        operacion = system_actions.normalizar_energia(action.cantidad)
+        if operacion is None:
+            return None
+        return _PREGUNTAS_ENERGIA[operacion]
+
+    return f"¿Confirmás que ejecute la acción {action.action}?"
+
+
+def dispatch(action: FileAction, raw_text: Optional[str] = None,
+             confirmed: bool = False) -> ExecutionResult:
+    """
+    Ejecuta una acción que no es de archivos, o prepara su confirmación.
+
+    Con `confirmed=False` (el caso normal), las acciones de CONFIRMATION_REQUIRED
+    NO se ejecutan: se devuelve la pregunta con `needs_confirmation=True` y es
+    MainLoop quien la hace por voz. Solo vuelve acá con `confirmed=True` si el
+    usuario dijo que sí de forma inequívoca (src/confirm.py falla hacia NO).
+
+    Todo intento queda en el log de auditoría, se haya ejecutado o no: hasta
+    ahora solo se auditaban las acciones de archivos, así que un apagado por voz
+    no dejaba ningún rastro (§4.6).
+    """
     handler = _HANDLERS.get(action.action)
+
     if handler is None:
         logger.warning(f"Acción sin handler todavía: {action.action}")
-        return ExecutionResult(text="Todavía no sé cómo hacer esa acción.")
-    return handler(action)
+        resultado = ExecutionResult(text="Todavía no sé cómo hacer esa acción.")
+    else:
+        pregunta = _pregunta_de_confirmacion(action) if not confirmed else None
+        if pregunta is not None:
+            logger.info(f"Acción irreversible pendiente de confirmación: {action.action}/{action.cantidad}")
+            resultado = ExecutionResult(text=pregunta, needs_confirmation=True)
+        else:
+            resultado = handler(action)
+
+    log_action(
+        raw_text,
+        action.model_dump(),
+        resultado.text,
+        extra={
+            "confirmado": confirmed,
+            "requiere_confirmacion": resultado.needs_confirmation,
+            "origen": "dispatch",
+        },
+    )
+    return resultado

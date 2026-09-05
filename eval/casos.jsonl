@@ -1,0 +1,66 @@
+{"id": "arch_crear_con_ubicacion", "texto": "crea una carpeta llamada tareas en clases", "esperado": {"action": "crear_carpeta", "ruta_base": "clases", "nombre": "tareas"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_crear_sin_ubicacion", "texto": "arma una carpeta que se llame fotos", "esperado": {"action": "crear_carpeta", "ruta_base": "", "nombre": "fotos"}, "etiquetas": ["archivos", "sin_ubicacion"]}
+{"id": "arch_crear_variante", "texto": "hacéme una carpeta nueva llamada facturas en proyectos", "esperado": {"action": "crear_carpeta", "ruta_base": "proyectos", "nombre": "facturas"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_crear_anidada", "texto": "crea una carpeta llamada parciales en clases, dentro de la carpeta matematica", "esperado": {"action": "crear_carpeta", "nombre": "parciales"}, "etiquetas": ["archivos", "anidado"]}
+{"id": "arch_crear_archivo", "texto": "crea un archivo llamado notas.txt en proyectos", "esperado": {"action": "crear_archivo", "ruta_base": "proyectos", "nombre": "notas.txt"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_crear_archivo_sin_ubicacion", "texto": "creame un archivo que se llame lista.md", "esperado": {"action": "crear_archivo", "ruta_base": "", "nombre": "lista.md"}, "etiquetas": ["archivos", "sin_ubicacion"]}
+{"id": "arch_crear_archivo_contenido", "texto": "crea un archivo llamado pendientes.txt en clases que diga estudiar para el final", "esperado": {"action": "crear_archivo", "ruta_base": "clases", "nombre": "pendientes.txt"}, "etiquetas": ["archivos", "contenido"]}
+{"id": "arch_eliminar_con_ubicacion", "texto": "elimina el archivo notas.txt en proyectos", "esperado": {"action": "eliminar", "ruta_base": "proyectos", "nombre": "notas.txt"}, "etiquetas": ["archivos", "destructiva", "ubicacion_explicita"]}
+{"id": "arch_eliminar_sin_ubicacion", "texto": "borrame el archivo viejo.zip", "esperado": {"action": "eliminar", "ruta_base": "", "nombre": "viejo.zip"}, "etiquetas": ["archivos", "destructiva", "sin_ubicacion"]}
+{"id": "arch_eliminar_carpeta", "texto": "eliminá la carpeta temporales de clases", "esperado": {"action": "eliminar", "ruta_base": "clases", "nombre": "temporales"}, "etiquetas": ["archivos", "destructiva"]}
+{"id": "arch_eliminar_enfatico", "texto": "eliminá para siempre el archivo basura.log que está en proyectos", "esperado": {"action": "eliminar", "ruta_base": "proyectos", "nombre": "basura.log"}, "etiquetas": ["archivos", "destructiva"]}
+{"id": "arch_mover_completo", "texto": "mueve el archivo examen.pdf de clases a proyectos", "esperado": {"action": "mover", "ruta_base": "clases", "nombre": "examen.pdf", "destino": "proyectos"}, "etiquetas": ["archivos", "destructiva", "ubicacion_explicita"]}
+{"id": "arch_mover_sin_origen", "texto": "pasa el resumen.pdf a la carpeta clases", "esperado": {"action": "mover", "ruta_base": "", "nombre": "resumen.pdf", "destino": "clases"}, "etiquetas": ["archivos", "destructiva", "sin_ubicacion"]}
+{"id": "arch_mover_a_subcarpeta", "texto": "mové el archivo cv.pdf de proyectos a la carpeta trabajo", "esperado": {"action": "mover", "ruta_base": "proyectos", "nombre": "cv.pdf", "destino": "trabajo"}, "etiquetas": ["archivos", "destructiva", "anidado"]}
+{"id": "arch_listar_con_ubicacion", "texto": "lista lo que hay en proyectos", "esperado": {"action": "listar", "ruta_base": "proyectos"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_listar_sin_ubicacion", "texto": "que archivos tengo", "esperado": {"action": "listar", "ruta_base": ""}, "etiquetas": ["archivos", "sin_ubicacion"]}
+{"id": "arch_listar_clases", "texto": "mostrame los archivos de clases", "esperado": {"action": "listar", "ruta_base": "clases"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_leer_con_ubicacion", "texto": "abrime el archivo config.json de proyectos y decime qué dice", "esperado": {"action": "leer", "ruta_base": "proyectos", "nombre": "config.json"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_leer_sin_ubicacion", "texto": "lee el archivo readme", "esperado": {"action": "leer", "ruta_base": "", "nombre": "readme"}, "etiquetas": ["archivos", "sin_ubicacion"]}
+{"id": "app_spotify", "texto": "abrí spotify", "esperado": {"action": "abrir_aplicacion", "nombre": "spotify"}, "etiquetas": ["apps"]}
+{"id": "app_discord", "texto": "podrías abrir discord", "esperado": {"action": "abrir_aplicacion", "nombre": "discord"}, "etiquetas": ["apps"]}
+{"id": "app_navegador", "texto": "abrime el navegador", "esperado": {"action": "abrir_aplicacion"}, "etiquetas": ["apps", "alias_generico"]}
+{"id": "ventana_chromium", "texto": "cambiate a la ventana de chromium", "esperado": {"action": "enfocar_ventana", "nombre": "chromium"}, "etiquetas": ["apps"]}
+{"id": "ventana_discord", "texto": "enfocá discord", "esperado": {"action": "enfocar_ventana", "nombre": "discord"}, "etiquetas": ["apps", "par_confundible"]}
+{"id": "rutina_programador", "texto": "activá el modo programador", "esperado": {"action": "ejecutar_rutina", "nombre": "modo programador"}, "etiquetas": ["apps"]}
+{"id": "vol_subir", "texto": "subí el volumen", "esperado": {"action": "volumen", "cantidad": "subir"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "vol_bajar", "texto": "bajá un poco el volumen", "esperado": {"action": "volumen", "cantidad": "bajar"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "vol_silenciar", "texto": "silenciá el audio", "esperado": {"action": "volumen", "cantidad": "silenciar"}, "etiquetas": ["sistema"]}
+{"id": "brillo_bajar", "texto": "bajá el brillo de la pantalla", "esperado": {"action": "brillo", "cantidad": "bajar"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "brillo_subir", "texto": "subí un poco el brillo", "esperado": {"action": "brillo", "cantidad": "subir"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "brillo_implicito", "texto": "está muy oscura la pantalla, subile el brillo", "esperado": {"action": "brillo", "cantidad": "subir"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "captura_pantalla", "texto": "sacá una captura de pantalla", "esperado": {"action": "captura_pantalla"}, "etiquetas": ["sistema"]}
+{"id": "wifi_apagar", "texto": "apagá el wifi", "esperado": {"action": "wifi", "cantidad": "bajar"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "wifi_desconectar", "texto": "desconectá el wifi", "esperado": {"action": "wifi", "cantidad": "bajar"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "wifi_prender", "texto": "prendé el wifi de nuevo", "esperado": {"action": "wifi", "cantidad": "subir"}, "etiquetas": ["sistema"]}
+{"id": "bluetooth_prender", "texto": "prendé el bluetooth", "esperado": {"action": "bluetooth", "cantidad": "subir"}, "etiquetas": ["sistema"]}
+{"id": "bluetooth_apagar", "texto": "apagá el bluetooth", "esperado": {"action": "bluetooth", "cantidad": "bajar"}, "etiquetas": ["sistema", "par_confundible"]}
+{"id": "energia_suspender", "texto": "poné la compu a dormir", "esperado": {"action": "energia", "cantidad": "suspender"}, "etiquetas": ["sistema", "destructiva"]}
+{"id": "energia_apagar", "texto": "apagá el equipo", "esperado": {"action": "energia", "cantidad": "apagar"}, "etiquetas": ["sistema", "destructiva", "par_confundible"]}
+{"id": "energia_reiniciar", "texto": "reiniciá la máquina", "esperado": {"action": "energia", "cantidad": "reiniciar"}, "etiquetas": ["sistema", "destructiva"]}
+{"id": "musica_pausar", "texto": "pausá la música", "esperado": {"action": "control_musica", "cantidad": "pausar"}, "etiquetas": ["musica"]}
+{"id": "musica_pausar_sinonimo", "texto": "parame la canción", "esperado": {"action": "control_musica", "cantidad": "pausar"}, "etiquetas": ["musica"]}
+{"id": "musica_reproducir", "texto": "seguí reproduciendo", "esperado": {"action": "control_musica", "cantidad": "reproducir"}, "etiquetas": ["musica"]}
+{"id": "musica_siguiente", "texto": "pasá a la siguiente canción", "esperado": {"action": "control_musica", "cantidad": "siguiente"}, "etiquetas": ["musica"]}
+{"id": "musica_anterior", "texto": "volvé a la canción anterior", "esperado": {"action": "control_musica", "cantidad": "anterior"}, "etiquetas": ["musica"]}
+{"id": "musica_apagar_confundible", "texto": "apagá la música", "esperado": {"action": "control_musica", "cantidad": "pausar"}, "etiquetas": ["musica", "par_confundible"]}
+{"id": "tiempo_hora", "texto": "qué hora es", "esperado": {"action": "hora"}, "etiquetas": ["tiempo"]}
+{"id": "tiempo_temporizador", "texto": "avisame en 10 minutos", "esperado": {"action": "temporizador", "cantidad": "10"}, "etiquetas": ["tiempo", "par_confundible"]}
+{"id": "tiempo_temporizador_motivo", "texto": "poneme un temporizador de 5 minutos para las papas", "esperado": {"action": "temporizador", "cantidad": "5"}, "etiquetas": ["tiempo"]}
+{"id": "tiempo_alarma", "texto": "ponéme una alarma a las 7:30", "esperado": {"action": "alarma", "cantidad": "7:30"}, "etiquetas": ["tiempo", "par_confundible"]}
+{"id": "tiempo_recordatorio_guardar", "texto": "recordame llamar al dentista", "esperado": {"action": "recordatorio", "contenido": "llamar al dentista"}, "etiquetas": ["tiempo", "par_confundible"]}
+{"id": "tiempo_recordatorio_consultar", "texto": "qué recordatorios tengo", "esperado": {"action": "recordatorio", "contenido": ""}, "etiquetas": ["tiempo", "consulta", "par_confundible"]}
+{"id": "tiempo_nota_guardar", "texto": "anotá que tengo que comprar leche", "esperado": {"action": "nota", "contenido": "comprar leche"}, "etiquetas": ["tiempo", "par_confundible"]}
+{"id": "tiempo_nota_consultar", "texto": "qué notas tengo guardadas", "esperado": {"action": "nota", "contenido": ""}, "etiquetas": ["tiempo", "consulta", "par_confundible"]}
+{"id": "util_calculo_suma", "texto": "cuánto es 340 más 128", "esperado": {"action": "calculo", "contenido": "340 + 128"}, "etiquetas": ["utilidades"]}
+{"id": "util_calculo_mixto", "texto": "cuánto es 10 por 5 menos 2", "esperado": {"action": "calculo", "contenido": "10 * 5 - 2"}, "etiquetas": ["utilidades"]}
+{"id": "util_calculo_division", "texto": "cuánto es 144 dividido 12", "esperado": {"action": "calculo", "contenido": "144 / 12"}, "etiquetas": ["utilidades"]}
+{"id": "util_conversion_temp", "texto": "a cuántos fahrenheit son 100 grados celsius", "esperado": {"action": "conversion", "cantidad": "100 celsius a fahrenheit"}, "etiquetas": ["utilidades"]}
+{"id": "util_conversion_dist", "texto": "convertime 5 kilómetros a millas", "esperado": {"action": "conversion", "cantidad": "5 kilometros a millas"}, "etiquetas": ["utilidades"]}
+{"id": "util_traduccion", "texto": "traducime hola al inglés", "esperado": {"action": "traduccion", "contenido": "hola", "destino": "ingles"}, "etiquetas": ["utilidades"]}
+{"id": "charla_saludo", "texto": "hola", "esperado": {"action": "saludo"}, "etiquetas": ["charla"]}
+{"id": "charla_saludo_dia", "texto": "buenos días niri", "esperado": {"action": "saludo"}, "etiquetas": ["charla"]}
+{"id": "charla_chiste", "texto": "contame un chiste", "esperado": {"action": "chiste"}, "etiquetas": ["charla"]}
+{"id": "charla_despedida", "texto": "chau niri", "esperado": {"action": "despedida"}, "etiquetas": ["charla"]}
+{"id": "fuera_alcance_clima", "texto": "qué tiempo va a hacer mañana", "esperado": {"action": "ninguna"}, "etiquetas": ["fuera_de_alcance"]}
+{"id": "fuera_alcance_general", "texto": "contame la historia de roma", "esperado": {"action": "ninguna"}, "etiquetas": ["fuera_de_alcance"]}

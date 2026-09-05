@@ -18,3 +18,8 @@ models/piper/
 :memory:*
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Corridas del banco de evaluación: ruido de churn. El baseline SÍ se versiona,
+# porque es la referencia contra la que se comparan las corridas futuras.
+eval/resultados/*.json
+!eval/resultados/baseline.json

@@ -1,0 +1,1264 @@
+{
+  "fecha": "2026-09-05T17:12:25",
+  "modelo": "qwen2.5:3b-instruct",
+  "total": 66,
+  "accion_ok": 65,
+  "slots_ok": 65,
+  "latencia_p50_ms": 312.5,
+  "latencia_p95_ms": 482.4,
+  "tokens_prompt": 3245,
+  "tokens_salida_mediana": 17.0,
+  "arranque_frio_s": 0.37,
+  "arranque_frio_detalle": {
+    "prompt_tokens": 3236,
+    "output_tokens": 8,
+    "prefill_ms": 243.7,
+    "decode_ms": 107.4,
+    "load_ms": 0.8
+  },
+  "casos": [
+    {
+      "id": "arch_crear_con_ubicacion",
+      "texto": "crea una carpeta llamada tareas en clases",
+      "etiquetas": [
+        "archivos",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_carpeta",
+        "ruta_base": "clases",
+        "nombre": "tareas"
+      },
+      "ms": 427.7,
+      "tokens_salida": 25,
+      "tokens_prompt": 3245
+    },
+    {
+      "id": "arch_crear_sin_ubicacion",
+      "texto": "arma una carpeta que se llame fotos",
+      "etiquetas": [
+        "archivos",
+        "sin_ubicacion"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_carpeta",
+        "nombre": "fotos"
+      },
+      "ms": 379.1,
+      "tokens_salida": 22,
+      "tokens_prompt": 3243
+    },
+    {
+      "id": "arch_crear_variante",
+      "texto": "hacéme una carpeta nueva llamada facturas en proyectos",
+      "etiquetas": [
+        "archivos",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_carpeta",
+        "ruta_base": "proyectos",
+        "nombre": "facturas"
+      },
+      "ms": 429.3,
+      "tokens_salida": 25,
+      "tokens_prompt": 3248
+    },
+    {
+      "id": "arch_crear_anidada",
+      "texto": "crea una carpeta llamada parciales en clases, dentro de la carpeta matematica",
+      "etiquetas": [
+        "archivos",
+        "anidado"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_carpeta",
+        "ruta_base": "matematica",
+        "nombre": "parciales"
+      },
+      "ms": 458.1,
+      "tokens_salida": 27,
+      "tokens_prompt": 3255
+    },
+    {
+      "id": "arch_crear_archivo",
+      "texto": "crea un archivo llamado notas.txt en proyectos",
+      "etiquetas": [
+        "archivos",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_archivo",
+        "ruta_base": "proyectos",
+        "nombre": "notas.txt"
+      },
+      "ms": 425.9,
+      "tokens_salida": 25,
+      "tokens_prompt": 3244
+    },
+    {
+      "id": "arch_crear_archivo_sin_ubicacion",
+      "texto": "creame un archivo que se llame lista.md",
+      "etiquetas": [
+        "archivos",
+        "sin_ubicacion"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_archivo",
+        "nombre": "lista.md"
+      },
+      "ms": 367.0,
+      "tokens_salida": 21,
+      "tokens_prompt": 3244
+    },
+    {
+      "id": "arch_crear_archivo_contenido",
+      "texto": "crea un archivo llamado pendientes.txt en clases que diga estudiar para el final",
+      "etiquetas": [
+        "archivos",
+        "contenido"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "crear_archivo",
+        "ruta_base": "clases",
+        "nombre": "pendientes.txt",
+        "contenido": "estudiar para el final"
+      },
+      "ms": 590.1,
+      "tokens_salida": 36,
+      "tokens_prompt": 3253
+    },
+    {
+      "id": "arch_eliminar_con_ubicacion",
+      "texto": "elimina el archivo notas.txt en proyectos",
+      "etiquetas": [
+        "archivos",
+        "destructiva",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "eliminar",
+        "ruta_base": "proyectos",
+        "nombre": "notas.txt"
+      },
+      "ms": 398.1,
+      "tokens_salida": 23,
+      "tokens_prompt": 3242
+    },
+    {
+      "id": "arch_eliminar_sin_ubicacion",
+      "texto": "borrame el archivo viejo.zip",
+      "etiquetas": [
+        "archivos",
+        "destructiva",
+        "sin_ubicacion"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "eliminar",
+        "nombre": "viejo.zip"
+      },
+      "ms": 350.7,
+      "tokens_salida": 20,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "arch_eliminar_carpeta",
+      "texto": "eliminá la carpeta temporales de clases",
+      "etiquetas": [
+        "archivos",
+        "destructiva"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "eliminar",
+        "ruta_base": "clases",
+        "nombre": "temporales"
+      },
+      "ms": 398.8,
+      "tokens_salida": 23,
+      "tokens_prompt": 3244
+    },
+    {
+      "id": "arch_eliminar_enfatico",
+      "texto": "eliminá para siempre el archivo basura.log que está en proyectos",
+      "etiquetas": [
+        "archivos",
+        "destructiva"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "eliminar",
+        "ruta_base": "proyectos",
+        "nombre": "basura.log"
+      },
+      "ms": 399.2,
+      "tokens_salida": 23,
+      "tokens_prompt": 3248
+    },
+    {
+      "id": "arch_mover_completo",
+      "texto": "mueve el archivo examen.pdf de clases a proyectos",
+      "etiquetas": [
+        "archivos",
+        "destructiva",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "mover",
+        "ruta_base": "clases",
+        "nombre": "examen.pdf",
+        "destino": "proyectos"
+      },
+      "ms": 533.6,
+      "tokens_salida": 32,
+      "tokens_prompt": 3245
+    },
+    {
+      "id": "arch_mover_sin_origen",
+      "texto": "pasa el resumen.pdf a la carpeta clases",
+      "etiquetas": [
+        "archivos",
+        "destructiva",
+        "sin_ubicacion"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "mover",
+        "nombre": "resumen.pdf",
+        "destino": "clases"
+      },
+      "ms": 490.5,
+      "tokens_salida": 29,
+      "tokens_prompt": 3245
+    },
+    {
+      "id": "arch_mover_a_subcarpeta",
+      "texto": "mové el archivo cv.pdf de proyectos a la carpeta trabajo",
+      "etiquetas": [
+        "archivos",
+        "destructiva",
+        "anidado"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "mover",
+        "ruta_base": "proyectos",
+        "nombre": "cv.pdf",
+        "destino": "trabajo"
+      },
+      "ms": 518.6,
+      "tokens_salida": 31,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "arch_listar_con_ubicacion",
+      "texto": "lista lo que hay en proyectos",
+      "etiquetas": [
+        "archivos",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "listar",
+        "ruta_base": "proyectos"
+      },
+      "ms": 296.8,
+      "tokens_salida": 16,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "arch_listar_sin_ubicacion",
+      "texto": "que archivos tengo",
+      "etiquetas": [
+        "archivos",
+        "sin_ubicacion"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "listar"
+      },
+      "ms": 264.7,
+      "tokens_salida": 14,
+      "tokens_prompt": 3237
+    },
+    {
+      "id": "arch_listar_clases",
+      "texto": "mostrame los archivos de clases",
+      "etiquetas": [
+        "archivos",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "listar",
+        "ruta_base": "clases"
+      },
+      "ms": 293.7,
+      "tokens_salida": 16,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "arch_leer_con_ubicacion",
+      "texto": "abrime el archivo config.json de proyectos y decime qué dice",
+      "etiquetas": [
+        "archivos",
+        "ubicacion_explicita"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "leer",
+        "ruta_base": "proyectos",
+        "nombre": "config.json"
+      },
+      "ms": 402.7,
+      "tokens_salida": 23,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "arch_leer_sin_ubicacion",
+      "texto": "lee el archivo readme",
+      "etiquetas": [
+        "archivos",
+        "sin_ubicacion"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "leer",
+        "nombre": "readme"
+      },
+      "ms": 351.8,
+      "tokens_salida": 20,
+      "tokens_prompt": 3238
+    },
+    {
+      "id": "app_spotify",
+      "texto": "abrí spotify",
+      "etiquetas": [
+        "apps"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "abrir_aplicacion",
+        "nombre": "spotify"
+      },
+      "ms": 305.3,
+      "tokens_salida": 17,
+      "tokens_prompt": 3237
+    },
+    {
+      "id": "app_discord",
+      "texto": "podrías abrir discord",
+      "etiquetas": [
+        "apps"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "abrir_aplicacion",
+        "nombre": "discord"
+      },
+      "ms": 303.9,
+      "tokens_salida": 17,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "app_navegador",
+      "texto": "abrime el navegador",
+      "etiquetas": [
+        "apps",
+        "alias_generico"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "abrir_aplicacion",
+        "nombre": "navegador"
+      },
+      "ms": 349.6,
+      "tokens_salida": 20,
+      "tokens_prompt": 3238
+    },
+    {
+      "id": "ventana_chromium",
+      "texto": "cambiate a la ventana de chromium",
+      "etiquetas": [
+        "apps"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "enfocar_ventana",
+        "nombre": "chromium"
+      },
+      "ms": 347.1,
+      "tokens_salida": 20,
+      "tokens_prompt": 3242
+    },
+    {
+      "id": "ventana_discord",
+      "texto": "enfocá discord",
+      "etiquetas": [
+        "apps",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "enfocar_ventana",
+        "nombre": "discord"
+      },
+      "ms": 332.0,
+      "tokens_salida": 19,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "rutina_programador",
+      "texto": "activá el modo programador",
+      "etiquetas": [
+        "apps"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "ejecutar_rutina",
+        "nombre": "modo programador"
+      },
+      "ms": 349.8,
+      "tokens_salida": 20,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "vol_subir",
+      "texto": "subí el volumen",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "volumen",
+        "cantidad": "subir"
+      },
+      "ms": 287.8,
+      "tokens_salida": 16,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "vol_bajar",
+      "texto": "bajá un poco el volumen",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "volumen",
+        "cantidad": "bajar"
+      },
+      "ms": 286.0,
+      "tokens_salida": 16,
+      "tokens_prompt": 3242
+    },
+    {
+      "id": "vol_silenciar",
+      "texto": "silenciá el audio",
+      "etiquetas": [
+        "sistema"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "volumen",
+        "cantidad": "silenciar"
+      },
+      "ms": 307.0,
+      "tokens_salida": 17,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "brillo_bajar",
+      "texto": "bajá el brillo de la pantalla",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "brillo",
+        "cantidad": "bajar"
+      },
+      "ms": 276.9,
+      "tokens_salida": 15,
+      "tokens_prompt": 3243
+    },
+    {
+      "id": "brillo_subir",
+      "texto": "subí un poco el brillo",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "brillo",
+        "cantidad": "subir"
+      },
+      "ms": 272.8,
+      "tokens_salida": 15,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "brillo_implicito",
+      "texto": "está muy oscura la pantalla, subile el brillo",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "brillo",
+        "cantidad": "subir"
+      },
+      "ms": 275.9,
+      "tokens_salida": 15,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "captura_pantalla",
+      "texto": "sacá una captura de pantalla",
+      "etiquetas": [
+        "sistema"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "captura_pantalla"
+      },
+      "ms": 214.7,
+      "tokens_salida": 11,
+      "tokens_prompt": 3242
+    },
+    {
+      "id": "wifi_apagar",
+      "texto": "apagá el wifi",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "wifi",
+        "cantidad": "bajar"
+      },
+      "ms": 258.9,
+      "tokens_salida": 14,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "wifi_desconectar",
+      "texto": "desconectá el wifi",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "wifi",
+        "cantidad": "bajar"
+      },
+      "ms": 260.7,
+      "tokens_salida": 14,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "wifi_prender",
+      "texto": "prendé el wifi de nuevo",
+      "etiquetas": [
+        "sistema"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "wifi",
+        "cantidad": "subir"
+      },
+      "ms": 262.1,
+      "tokens_salida": 14,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "bluetooth_prender",
+      "texto": "prendé el bluetooth",
+      "etiquetas": [
+        "sistema"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "bluetooth",
+        "cantidad": "subir"
+      },
+      "ms": 270.9,
+      "tokens_salida": 15,
+      "tokens_prompt": 3238
+    },
+    {
+      "id": "bluetooth_apagar",
+      "texto": "apagá el bluetooth",
+      "etiquetas": [
+        "sistema",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "bluetooth",
+        "cantidad": "bajar"
+      },
+      "ms": 277.0,
+      "tokens_salida": 15,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "energia_suspender",
+      "texto": "poné la compu a dormir",
+      "etiquetas": [
+        "sistema",
+        "destructiva"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "energia",
+        "cantidad": "suspender"
+      },
+      "ms": 292.2,
+      "tokens_salida": 16,
+      "tokens_prompt": 3242
+    },
+    {
+      "id": "energia_apagar",
+      "texto": "apagá el equipo",
+      "etiquetas": [
+        "sistema",
+        "destructiva",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "energia",
+        "cantidad": "apagar"
+      },
+      "ms": 279.0,
+      "tokens_salida": 15,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "energia_reiniciar",
+      "texto": "reiniciá la máquina",
+      "etiquetas": [
+        "sistema",
+        "destructiva"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "energia",
+        "cantidad": "reiniciar"
+      },
+      "ms": 289.7,
+      "tokens_salida": 16,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "musica_pausar",
+      "texto": "pausá la música",
+      "etiquetas": [
+        "musica"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "control_musica",
+        "cantidad": "pausar"
+      },
+      "ms": 323.0,
+      "tokens_salida": 18,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "musica_pausar_sinonimo",
+      "texto": "parame la canción",
+      "etiquetas": [
+        "musica"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "control_musica",
+        "cantidad": "pausar"
+      },
+      "ms": 325.8,
+      "tokens_salida": 18,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "musica_reproducir",
+      "texto": "seguí reproduciendo",
+      "etiquetas": [
+        "musica"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "control_musica",
+        "cantidad": "reproducir"
+      },
+      "ms": 341.3,
+      "tokens_salida": 19,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "musica_siguiente",
+      "texto": "pasá a la siguiente canción",
+      "etiquetas": [
+        "musica"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "control_musica",
+        "cantidad": "siguiente"
+      },
+      "ms": 324.2,
+      "tokens_salida": 18,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "musica_anterior",
+      "texto": "volvé a la canción anterior",
+      "etiquetas": [
+        "musica"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "control_musica",
+        "cantidad": "anterior"
+      },
+      "ms": 308.7,
+      "tokens_salida": 17,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "musica_apagar_confundible",
+      "texto": "apagá la música",
+      "etiquetas": [
+        "musica",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "control_musica",
+        "cantidad": "pausar"
+      },
+      "ms": 321.5,
+      "tokens_salida": 18,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "tiempo_hora",
+      "texto": "qué hora es",
+      "etiquetas": [
+        "tiempo"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "hora"
+      },
+      "ms": 158.8,
+      "tokens_salida": 7,
+      "tokens_prompt": 3237
+    },
+    {
+      "id": "tiempo_temporizador",
+      "texto": "avisame en 10 minutos",
+      "etiquetas": [
+        "tiempo",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "temporizador",
+        "cantidad": "10"
+      },
+      "ms": 294.2,
+      "tokens_salida": 16,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "tiempo_temporizador_motivo",
+      "texto": "poneme un temporizador de 5 minutos para las papas",
+      "etiquetas": [
+        "tiempo"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "temporizador",
+        "cantidad": "5"
+      },
+      "ms": 284.8,
+      "tokens_salida": 15,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "tiempo_alarma",
+      "texto": "ponéme una alarma a las 7:30",
+      "etiquetas": [
+        "tiempo",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "alarma",
+        "cantidad": "7:30"
+      },
+      "ms": 316.3,
+      "tokens_salida": 17,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "tiempo_recordatorio_guardar",
+      "texto": "recordame llamar al dentista",
+      "etiquetas": [
+        "tiempo",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "recordatorio",
+        "contenido": "llamar al dentista"
+      },
+      "ms": 329.2,
+      "tokens_salida": 18,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "tiempo_recordatorio_consultar",
+      "texto": "qué recordatorios tengo",
+      "etiquetas": [
+        "tiempo",
+        "consulta",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "recordatorio"
+      },
+      "ms": 253.3,
+      "tokens_salida": 13,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "tiempo_nota_guardar",
+      "texto": "anotá que tengo que comprar leche",
+      "etiquetas": [
+        "tiempo",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "nota",
+        "contenido": "comprar leche"
+      },
+      "ms": 302.9,
+      "tokens_salida": 16,
+      "tokens_prompt": 3243
+    },
+    {
+      "id": "tiempo_nota_consultar",
+      "texto": "qué notas tengo guardadas",
+      "etiquetas": [
+        "tiempo",
+        "consulta",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "nota"
+      },
+      "ms": 239.5,
+      "tokens_salida": 12,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "util_calculo_suma",
+      "texto": "cuánto es 340 más 128",
+      "etiquetas": [
+        "utilidades"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "calculo",
+        "contenido": "340 + 128"
+      },
+      "ms": 377.3,
+      "tokens_salida": 21,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "util_calculo_mixto",
+      "texto": "cuánto es 10 por 5 menos 2",
+      "etiquetas": [
+        "utilidades"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "calculo",
+        "contenido": "10 * 5 - 2"
+      },
+      "ms": 378.8,
+      "tokens_salida": 21,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "util_calculo_division",
+      "texto": "cuánto es 144 dividido 12",
+      "etiquetas": [
+        "utilidades"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "calculo",
+        "contenido": "144 / 12"
+      },
+      "ms": 365.0,
+      "tokens_salida": 20,
+      "tokens_prompt": 3247
+    },
+    {
+      "id": "util_conversion_temp",
+      "texto": "a cuántos fahrenheit son 100 grados celsius",
+      "etiquetas": [
+        "utilidades"
+      ],
+      "accion_ok": false,
+      "slots_ok": false,
+      "ok": false,
+      "diferencias": [
+        "action: esperaba 'conversion', dio 'calculo'",
+        "cantidad: esperaba '100 celsius a fahrenheit', dio ''"
+      ],
+      "obtenido": {
+        "action": "calculo",
+        "contenido": "100 * 9/5 + 32"
+      },
+      "ms": 442.7,
+      "tokens_salida": 25,
+      "tokens_prompt": 3249
+    },
+    {
+      "id": "util_conversion_dist",
+      "texto": "convertime 5 kilómetros a millas",
+      "etiquetas": [
+        "utilidades"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "conversion",
+        "cantidad": "5 kilometros a millas"
+      },
+      "ms": 336.3,
+      "tokens_salida": 18,
+      "tokens_prompt": 3244
+    },
+    {
+      "id": "util_traduccion",
+      "texto": "traducime hola al inglés",
+      "etiquetas": [
+        "utilidades"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "traduccion",
+        "destino": "inglés",
+        "contenido": "hola"
+      },
+      "ms": 441.2,
+      "tokens_salida": 25,
+      "tokens_prompt": 3241
+    },
+    {
+      "id": "charla_saludo",
+      "texto": "hola",
+      "etiquetas": [
+        "charla"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "saludo"
+      },
+      "ms": 170.9,
+      "tokens_salida": 8,
+      "tokens_prompt": 3236
+    },
+    {
+      "id": "charla_saludo_dia",
+      "texto": "buenos días niri",
+      "etiquetas": [
+        "charla"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "saludo"
+      },
+      "ms": 173.2,
+      "tokens_salida": 8,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "charla_chiste",
+      "texto": "contame un chiste",
+      "etiquetas": [
+        "charla"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "chiste"
+      },
+      "ms": 173.4,
+      "tokens_salida": 8,
+      "tokens_prompt": 3239
+    },
+    {
+      "id": "charla_despedida",
+      "texto": "chau niri",
+      "etiquetas": [
+        "charla"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "despedida"
+      },
+      "ms": 198.2,
+      "tokens_salida": 9,
+      "tokens_prompt": 3238
+    },
+    {
+      "id": "fuera_alcance_clima",
+      "texto": "qué tiempo va a hacer mañana",
+      "etiquetas": [
+        "fuera_de_alcance"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "ninguna"
+      },
+      "ms": 184.9,
+      "tokens_salida": 8,
+      "tokens_prompt": 3240
+    },
+    {
+      "id": "fuera_alcance_general",
+      "texto": "contame la historia de roma",
+      "etiquetas": [
+        "fuera_de_alcance"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "ninguna"
+      },
+      "ms": 186.1,
+      "tokens_salida": 8,
+      "tokens_prompt": 3240
+    }
+  ]
+}

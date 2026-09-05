@@ -3,11 +3,12 @@ import wave
 import datetime
 import numpy as np
 import sounddevice as sd
+from contextlib import nullcontext
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 
-from src.audio import AudioStream
+from src.audio import AudioStream, AudioDeviceLost
 from src.wake_word import WakeWordDetector
 from src.vad import VoiceActivityDetector
 from src.stt import SpeechToText
@@ -18,6 +19,7 @@ from src.confirm import interpret_confirmation
 from src.paths import parse_location_speech, speakable_path, DEFAULT_ROOT
 from src.actions.dispatch import dispatch as dispatch_non_file_action, NON_FILE_ACTIONS
 from src.actions.time_actions import check_due_timers
+from src.metrics import TurnoMetricas
 from src.logger import get_logger
 from src.config import RECORDINGS_DIR, BEEP_ON_WAKE_WORD, SAMPLE_RATE, CHANNELS
 
@@ -62,6 +64,8 @@ class MainLoop:
         self.tts = TextToSpeech()
         self.state = State.IDLE
         self.running = False
+        # Métricas del turno en curso (None mientras se espera el wake word).
+        self.turno: Optional[TurnoMetricas] = None
 
     def save_utterance(self, audio_data: np.ndarray):
         """Saves the recorded utterance to a WAV file."""
@@ -130,20 +134,50 @@ class MainLoop:
                 logger.info("Utterance was too short, discarding.")
                 return None
 
+    def _reabrir_audio(self):
+        """
+        Cierra la entrada de audio y vuelve a elegir dispositivo.
+
+        Se llama cuando el micrófono deja de entregar datos en pleno uso —el caso
+        real es desenchufar el USB—. Vuelve a IDLE y descarta el turno en curso:
+        cualquier orden a medio capturar quedó incompleta, y actuar sobre media
+        orden es peor que perderla.
+        """
+        self.turno = None
+        self.state = State.IDLE
+        self.audio.stop()
+        self.audio.reset_buffers()
+        self.audio.start()
+
+    def _medir(self, nombre: str):
+        """
+        Contexto que suma el tiempo del bloque a la etapa `nombre` del turno.
+
+        Fuera de un turno no mide nada: el aviso de un temporizador vencido
+        también pasa por _say(), pero ocurre en IDLE y no es latencia de una
+        orden del usuario, así que ensuciaría la serie.
+        """
+        if self.turno is None:
+            return nullcontext()
+        return self.turno.etapa(nombre)
+
     def _say(self, text: str):
         """Habla `text` y limpia la cola de audio para ignorar el eco de la propia voz."""
         if not text:
             return
-        self.tts.speak(text)
+        with self._medir("tts"):
+            self.tts.speak(text)
         self.audio.q.queue.clear()
 
     def _listen_reply(self, max_wait_seconds: float = 6.0) -> str:
         """Captura una respuesta corta del usuario y la transcribe. Devuelve
         cadena vacía si no hubo voz (silencio/timeout)."""
-        audio = self.capture_utterance(max_wait_seconds=max_wait_seconds)
+        with self._medir("vad"):
+            audio = self.capture_utterance(max_wait_seconds=max_wait_seconds)
         if audio is None:
             return ""
-        return self.stt.transcribe(audio) or ""
+        with self._medir("stt"):
+            return self.stt.transcribe(audio) or ""
 
     def _ask_location(self, question: str) -> Optional[Path]:
         """Pregunta una ubicación por voz e intenta resolverla a una ruta
@@ -249,6 +283,32 @@ class MainLoop:
             logger.info(f"Acción cancelada (respuesta: '{answer}'). NO ejecutada: {action}")
             self._say("Entendido, operación cancelada.")
 
+    def _confirm_non_file_action(self, action, original_text: str, question: str):
+        """
+        Confirmación por voz para acciones que no son de archivos pero sí son
+        irreversibles (hoy solo 'energia': suspender/apagar/reiniciar el equipo).
+
+        Misma política fail-safe que _handle_confirmation: silencio, timeout o
+        respuesta ambigua ⇒ cancelar. Es la segunda barrera del hallazgo del
+        banco de evaluación, donde "apagá el bluetooth" se clasificaba como
+        energia/apagar y llegaba a `systemctl poweroff` sin preguntar.
+        """
+        self._say(question)
+        answer = self._listen_reply(max_wait_seconds=5.0)
+
+        if not answer:
+            logger.warning(f"Sin respuesta de confirmación para: {action}. Cancelado por seguridad.")
+            self._say("No escuché una confirmación. Operación cancelada por seguridad.")
+            return
+
+        logger.info(f"[CONFIRMACIÓN USUARIO]: {answer}")
+        if interpret_confirmation(answer) is True:
+            result = dispatch_non_file_action(action, raw_text=original_text, confirmed=True)
+            self._say(result.text)
+        else:
+            logger.info(f"Acción cancelada (respuesta: '{answer}'). NO ejecutada: {action}")
+            self._say("Entendido, operación cancelada.")
+
     def _dispatch_action(self, action, text: str):
         """Resuelve ubicación (preguntando/confirmando cuando hace falta) y ejecuta la acción."""
         if action.action == "ninguna":
@@ -257,8 +317,11 @@ class MainLoop:
             return
 
         if action.action in NON_FILE_ACTIONS:
-            result = dispatch_non_file_action(action)
-            self._say(result.text)
+            result = dispatch_non_file_action(action, raw_text=text)
+            if result.needs_confirmation:
+                self._confirm_non_file_action(action, text, result.text)
+            else:
+                self._say(result.text)
             return
 
         if action.action != "listar" and not action.nombre:
@@ -305,41 +368,66 @@ class MainLoop:
 
         try:
             while self.running:
-                if self.state == State.IDLE:
-                    # Chequeo de temporizadores/alarmas vencidos, throttleado a
-                    # 1 vez por segundo (no en cada chunk de 80ms) para no
-                    # pegarle a disco 12 veces por segundo sin necesidad.
-                    now = time.monotonic()
-                    if now - last_timer_check >= 1.0:
-                        last_timer_check = now
-                        for mensaje in check_due_timers():
-                            self._say(mensaje)
+                try:
+                    if self.state == State.IDLE:
+                        # Chequeo de temporizadores/alarmas vencidos, throttleado a
+                        # 1 vez por segundo (no en cada chunk de 80ms) para no
+                        # pegarle a disco 12 veces por segundo sin necesidad.
+                        now = time.monotonic()
+                        if now - last_timer_check >= 1.0:
+                            last_timer_check = now
+                            for mensaje in check_due_timers():
+                                self._say(mensaje)
 
-                    # In IDLE, read 80ms chunks (1280 samples) for wake word
-                    chunk = self.audio.read_chunk(1280)
-                    if self.ww.feed(chunk):
-                        logger.info("Transitioning to LISTENING state")
-                        play_beep()
-                        self.state = State.LISTENING
+                        # In IDLE, read 80ms chunks (1280 samples) for wake word
+                        chunk = self.audio.read_chunk(1280)
+                        if self.ww.feed(chunk):
+                            logger.info("Transitioning to LISTENING state")
+                            play_beep()
+                            self.state = State.LISTENING
 
-                elif self.state == State.LISTENING:
-                    utterance_audio = self.capture_utterance(max_wait_seconds=3.0)
+                    elif self.state == State.LISTENING:
+                        self.turno = TurnoMetricas()
+                        accion_del_turno = None
 
-                    if utterance_audio is not None:
-                        self.save_utterance(utterance_audio)
+                        with self._medir("vad"):
+                            utterance_audio = self.capture_utterance(max_wait_seconds=3.0)
 
-                        text = self.stt.transcribe(utterance_audio)
-                        # Whisper can hallucinate spaces or symbols, so check if there's actual text
-                        if text and any(c.isalpha() for c in text):
-                            logger.info(f"[USER SAYS]: {text}")
+                        if utterance_audio is not None:
+                            self.save_utterance(utterance_audio)
 
-                            action = self.nlu.parse(text)
-                            self._dispatch_action(action, text)
-                        else:
-                            logger.info("Discarding empty or noise-only transcription.")
+                            with self._medir("stt"):
+                                text = self.stt.transcribe(utterance_audio)
+                            # Whisper can hallucinate spaces or symbols, so check if there's actual text
+                            if text and any(c.isalpha() for c in text):
+                                logger.info(f"[USER SAYS]: {text}")
 
-                    logger.info("Transitioning to IDLE state")
-                    self.state = State.IDLE
+                                with self._medir("nlu"):
+                                    action = self.nlu.parse(text)
+                                accion_del_turno = action.action
+                                self._dispatch_action(action, text)
+                            else:
+                                logger.info("Discarding empty or noise-only transcription.")
+
+                        # Una línea por turno en logs/metrics.jsonl. Los tokens solo
+                        # se anotan si hubo parseo: si no, last_metrics todavía tiene
+                        # los del turno anterior y estaría mintiendo.
+                        tokens = self.nlu.last_metrics if accion_del_turno else {}
+                        self.turno.registrar(
+                            accion=accion_del_turno,
+                            audio_s=(round(len(utterance_audio) / SAMPLE_RATE, 2)
+                                     if utterance_audio is not None else None),
+                            tokens_prompt=tokens.get("prompt_tokens"),
+                            tokens_salida=tokens.get("output_tokens"),
+                        )
+                        self.turno = None
+
+                        logger.info("Transitioning to IDLE state")
+                        self.state = State.IDLE
+                except AudioDeviceLost as e:
+                    # No es un error fatal: el dispositivo puede volver.
+                    logger.warning(f"{e} Reabriendo la entrada de audio.")
+                    self._reabrir_audio()
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received. Stopping...")
         finally:

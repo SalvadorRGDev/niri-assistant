@@ -1,19 +1,155 @@
 import json
+import os
+import unicodedata
+from typing import Optional
+
 from ollama import Client
 from src.schemas import FileAction
 from src.logger import get_logger
 
 logger = get_logger("NLU")
 
+# Ollama reporta duraciones en nanosegundos; el resto del proyecto razona en ms.
+_NS_POR_MS = 1_000_000
+
+# Ventana de contexto explícita, en vez de depender del default del servidor.
+#
+# Importa porque el modo de falla es silencioso: si el prompt no entra, Ollama lo
+# trunca POR EL PRINCIPIO y responde igual —sin error y sin log—, así que la única
+# señal sería que el asistente entiende peor sin motivo aparente. Con el default de
+# 4096 el turno llegó a consumir 3859 tokens (6% de margen); incluso con el prompt
+# ya compactado (~3240) quedaba en 21%, debajo del mínimo de abajo.
+#
+# Costo medido de subir a 5120: la huella en VRAM pasó de 2127 a 2249 MiB (+122,
+# más que la KV sola porque Ollama agranda también el buffer de cómputo), y quedan
+# ~1847 MiB de los 4096 para el escritorio.
+NUM_CTX = int(os.getenv("NLU_NUM_CTX", "5120"))
+
+# Margen mínimo de ventana libre antes de avisar. 25% deja lugar para una orden
+# larga y para crecer el prompt sin quedar al borde del truncado.
+MARGEN_MINIMO = 0.25
+
+# Aparatos que, si el usuario los nombra, hacen imposible que la acción sea
+# 'energia': "apagá el bluetooth" no apaga la computadora.
+#
+# Esta corrección es determinista a propósito. El prompt ya advierte el caso en
+# mayúsculas Y tiene ejemplos de los dos lados, y qwen2.5:3b se equivoca igual —
+# medido en el banco de evaluación. Como la acción equivocada desemboca en
+# `systemctl poweroff`, la defensa no puede quedar en manos del modelo. La
+# confirmación por voz de src/actions/dispatch.py es la segunda barrera; esta es
+# la primera, y evita además tener que contestarle "no" a una pregunta absurda.
+_APARATOS_NO_ENERGIA = (("bluetooth", "bluetooth"), ("wifi", "wifi"), ("wi fi", "wifi"))
+
+# Vocabulario canónico de 'cantidad' para wifi y bluetooth. El esquema dice
+# "subir"=encender y "bajar"=apagar, pero el modelo devuelve a veces "apagar".
+# src/actions/system.py ya tolera esas formas; canonizarlas acá evita que cada
+# consumidor futuro tenga que repetir la misma tolerancia. El orden importa:
+# "desconect" tiene que evaluarse antes que "conect".
+_ENCENDIDO_A_CANTIDAD = (
+    ("apag", "bajar"), ("desconect", "bajar"), ("desactiv", "bajar"),
+    ("prend", "subir"), ("encend", "subir"), ("activ", "subir"), ("conect", "subir"),
+)
+
+
+def _normalizar(texto: str) -> str:
+    """minúsculas, sin acentos, sin guiones (para que "wi-fi" case con "wi fi")."""
+    texto = (texto or "").lower().replace("-", " ")
+    return "".join(c for c in unicodedata.normalize("NFKD", texto) if not unicodedata.combining(c))
+
+
+def _canonizar_encendido(cantidad: Optional[str]) -> Optional[str]:
+    """
+    Lleva la 'cantidad' de wifi/bluetooth al par canónico subir/bajar.
+
+    Si no reconoce la forma, devuelve la original sin tocar: prefiere dejarla
+    pasar tal cual —src/actions/system.py la vuelve a normalizar— antes que
+    inventar una dirección que el usuario no pidió.
+    """
+    normalizada = _normalizar(cantidad)
+    if normalizada in ("subir", "bajar"):
+        return normalizada
+    for aguja, canonica in _ENCENDIDO_A_CANTIDAD:
+        if aguja in normalizada:
+            return canonica
+    return cantidad
+
+
+def corregir_intencion(texto: str, action: FileAction) -> FileAction:
+    """
+    Corrige errores de clasificación conocidos y verificados del modelo.
+
+    Solo actúa sobre casos donde la acción equivocada tiene consecuencias reales
+    y la regla es inequívoca: hoy, que nombrar el wifi o el bluetooth descarta
+    'energia'. No es un router genérico ni adivina intenciones; ante cualquier
+    otra cosa devuelve la acción tal como vino.
+    """
+    if action.action == "energia":
+        normalizado = _normalizar(texto)
+        for aguja, accion_correcta in _APARATOS_NO_ENERGIA:
+            if aguja in normalizado:
+                logger.warning(
+                    f"Corrección determinista: el NLU devolvió 'energia' para una orden que "
+                    f"nombra '{aguja}'. Se reinterpreta como '{accion_correcta}' "
+                    f"(cantidad={action.cantidad!r})."
+                )
+                action = action.model_copy(update={"action": accion_correcta})
+                break
+
+    if action.action in ("wifi", "bluetooth"):
+        canonica = _canonizar_encendido(action.cantidad)
+        if canonica not in ("subir", "bajar"):
+            # El modelo no dejó una dirección utilizable. Sacarla de lo que el
+            # usuario realmente dijo, en vez de dejar que src/actions/system.py
+            # caiga en su default "subir" y termine PRENDIENDO lo que se pidió
+            # apagar. Si el texto tampoco la tiene, se deja como vino y el
+            # handler decide.
+            desde_texto = _canonizar_encendido(texto)
+            if desde_texto in ("subir", "bajar"):
+                canonica = desde_texto
+        if canonica != action.cantidad:
+            action = action.model_copy(update={"cantidad": canonica})
+
+    return action
+
+
+def _extract_metrics(response) -> dict:
+    """
+    Extrae tokens y tiempos de una respuesta de Ollama.
+
+    Sirve para dos cosas distintas: alimentar logs/metrics.jsonl en producción y
+    comparar corridas del banco de evaluación. Nunca incluye texto —ni el prompt
+    ni la transcripción— porque su destino es un archivo que se puede leer y
+    compartir sin exponer lo que dijo el usuario.
+    """
+    try:
+        d = response.model_dump()
+    except Exception:  # respuesta con otra forma (cliente distinto, mock, etc.)
+        return {}
+    return {
+        "prompt_tokens": d.get("prompt_eval_count"),
+        "output_tokens": d.get("eval_count"),
+        "prefill_ms": round((d.get("prompt_eval_duration") or 0) / _NS_POR_MS, 1),
+        "decode_ms": round((d.get("eval_duration") or 0) / _NS_POR_MS, 1),
+        "load_ms": round((d.get("load_duration") or 0) / _NS_POR_MS, 1),
+    }
+
 class NLU:
     def __init__(self, model_name="qwen2.5:3b-instruct"):
         self.model_name = model_name
         self.client = Client()
+        # Métricas de la última llamada (tokens y tiempos que reporta Ollama).
+        # Las consume src/metrics.py y eval/run.py; se sobrescribe en cada parse().
+        self.last_metrics: dict = {}
+        # El aviso de margen de contexto se emite una sola vez por proceso: es
+        # una condición estructural del prompt, no un evento por turno.
+        self._margen_avisado = False
         
         # Pull model if not exists, but usually we assume the user has it.
         logger.info(f"NLU initialized with model '{self.model_name}'")
         
         self.system_prompt = """
+        Devolvés SOLO las claves que aplican: omití toda clave vacía o nula.
+
         Eres el cerebro lógico de un asistente de voz llamado Niri.
         Tu tarea es interpretar la orden del usuario y mapearla a UNA de las acciones
         conocidas (archivos, aplicaciones, ventanas o rutinas). Extrae la intención y
@@ -26,11 +162,19 @@ class NLU:
         para despedidas ("chau", "nos vemos", "hasta luego"). 'chiste' es cuando piden
         explícitamente un chiste.
 
+        MUY IMPORTANTE — 'crear_carpeta' vs 'crear_archivo': si el usuario dice
+        "archivo" o "documento", la acción es 'crear_archivo'. Si dice "carpeta",
+        "directorio" o "folder", es 'crear_carpeta'. Nunca las intercambies: crear
+        una carpeta cuando pidieron un archivo deja basura en el disco del usuario.
+
         Sobre 'calculo': 'contenido' es la expresión matemática tal cual, usando
         SOLO dígitos y los símbolos + - * / ( ) — nunca palabras. Ej. "cuánto es 340
         más 128" -> contenido="340 + 128".
         Sobre 'conversion': 'cantidad' es EXACTAMENTE "<valor> <unidad origen> a <unidad
         destino>" en minúsculas, ej. "100 celsius a fahrenheit" o "5 kilometros a millas".
+        'conversion' vs 'calculo': si aparecen UNIDADES (grados, celsius, fahrenheit,
+        kilometros, millas, kilos, libras, metros), es 'conversion' aunque la frase
+        empiece con "a cuántos" o "cuánto es". 'calculo' es solo aritmética sin unidades.
         Sobre 'traduccion': 'contenido' es el texto a traducir tal cual lo dijo el
         usuario, 'destino' es el idioma pedido (ej. "inglés", "portugués").
 
@@ -60,6 +204,9 @@ class NLU:
         "bajar"=apagar/desconectar (nunca "silenciar").
         Sobre 'energia': usa 'cantidad' con SOLO "suspender", "apagar" o "reiniciar".
 
+        Sobre 'control_musica' cuando piden "apagar" la música: eso es 'pausar'
+        (cantidad="pausar"), nunca 'energia' ni cantidad="apagar".
+
         MUY IMPORTANTE — no confundir 'wifi'/'bluetooth' con 'energia': si el usuario
         nombra explícitamente "wifi" o "bluetooth", la acción es 'wifi'/'bluetooth'
         (nunca 'energia'), sin importar si dice "apagar", "desconectar" o "prender".
@@ -77,167 +224,207 @@ class NLU:
 
         Ejemplos (fijate que la MISMA acción aparece a veces con ubicación y a veces sin):
         Usuario: "elimina el archivo notas.txt en proyectos"
-        {"action": "eliminar", "ruta_base": "proyectos", "nombre": "notas.txt", "destino": null, "contenido": null}
+        {"action": "eliminar", "ruta_base": "proyectos", "nombre": "notas.txt"}
 
         Usuario: "borrame el archivo viejo.zip"
-        {"action": "eliminar", "ruta_base": "", "nombre": "viejo.zip", "destino": null, "contenido": null}
+        {"action": "eliminar", "ruta_base": "", "nombre": "viejo.zip"}
 
         Usuario: "crea una carpeta llamada tareas en clases"
-        {"action": "crear_carpeta", "ruta_base": "clases", "nombre": "tareas", "destino": null, "contenido": null}
+        {"action": "crear_carpeta", "ruta_base": "clases", "nombre": "tareas"}
 
         Usuario: "arma una carpeta que se llame fotos"
-        {"action": "crear_carpeta", "ruta_base": "", "nombre": "fotos", "destino": null, "contenido": null}
+        {"action": "crear_carpeta", "ruta_base": "", "nombre": "fotos"}
+
+        Usuario: "crea un archivo llamado notas.txt en proyectos"
+        {"action": "crear_archivo", "ruta_base": "proyectos", "nombre": "notas.txt"}
+
+        Usuario: "creame un archivo que se llame lista.md"
+        {"action": "crear_archivo", "ruta_base": "", "nombre": "lista.md"}
+
+        Usuario: "crea un archivo llamado pendientes.txt en clases que diga estudiar para el final"
+        {"action": "crear_archivo", "ruta_base": "clases", "nombre": "pendientes.txt", "contenido": "estudiar para el final"}
 
         Usuario: "mueve el archivo examen.pdf de clases a proyectos"
-        {"action": "mover", "ruta_base": "clases", "nombre": "examen.pdf", "destino": "proyectos", "contenido": null}
+        {"action": "mover", "ruta_base": "clases", "nombre": "examen.pdf", "destino": "proyectos"}
 
         Usuario: "pasa el resumen.pdf a la carpeta clases"
-        {"action": "mover", "ruta_base": "", "nombre": "resumen.pdf", "destino": "clases", "contenido": null}
+        {"action": "mover", "ruta_base": "", "nombre": "resumen.pdf", "destino": "clases"}
 
         Usuario: "lee el archivo readme"
-        {"action": "leer", "ruta_base": "", "nombre": "readme", "destino": null, "contenido": null}
+        {"action": "leer", "ruta_base": "", "nombre": "readme"}
 
         Usuario: "abrime el archivo config.json de proyectos y decime que dice"
-        {"action": "leer", "ruta_base": "proyectos", "nombre": "config.json", "destino": null, "contenido": null}
+        {"action": "leer", "ruta_base": "proyectos", "nombre": "config.json"}
 
         Usuario: "lista lo que hay en proyectos"
-        {"action": "listar", "ruta_base": "proyectos", "nombre": null, "destino": null, "contenido": null}
+        {"action": "listar", "ruta_base": "proyectos"}
 
         Usuario: "que archivos tengo"
-        {"action": "listar", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "listar", "ruta_base": ""}
 
         Usuario: "abrí spotify"
-        {"action": "abrir_aplicacion", "ruta_base": "", "nombre": "spotify", "destino": null, "contenido": null}
+        {"action": "abrir_aplicacion", "nombre": "spotify"}
 
         Usuario: "podrías abrir discord"
-        {"action": "abrir_aplicacion", "ruta_base": "", "nombre": "discord", "destino": null, "contenido": null}
+        {"action": "abrir_aplicacion", "nombre": "discord"}
 
         Usuario: "activá el modo programador"
-        {"action": "ejecutar_rutina", "ruta_base": "", "nombre": "modo programador", "destino": null, "contenido": null}
+        {"action": "ejecutar_rutina", "nombre": "modo programador"}
 
         Usuario: "cambiate a la ventana de chromium"
-        {"action": "enfocar_ventana", "ruta_base": "", "nombre": "chromium", "destino": null, "contenido": null}
+        {"action": "enfocar_ventana", "nombre": "chromium"}
 
         Usuario: "enfocá discord"
-        {"action": "enfocar_ventana", "ruta_base": "", "nombre": "discord", "destino": null, "contenido": null}
+        {"action": "enfocar_ventana", "nombre": "discord"}
 
         Usuario: "subí el volumen"
-        {"action": "volumen", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "subir"}
+        {"action": "volumen", "cantidad": "subir"}
 
         Usuario: "bajá un poco el volumen"
-        {"action": "volumen", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "bajar"}
+        {"action": "volumen", "cantidad": "bajar"}
 
         Usuario: "silenciá el audio"
-        {"action": "volumen", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "silenciar"}
+        {"action": "volumen", "cantidad": "silenciar"}
 
         Usuario: "bajá el brillo de la pantalla"
-        {"action": "brillo", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "bajar"}
+        {"action": "brillo", "cantidad": "bajar"}
 
         Usuario: "subí un poco el brillo"
-        {"action": "brillo", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "subir"}
+        {"action": "brillo", "cantidad": "subir"}
 
         Usuario: "sacá una captura de pantalla"
-        {"action": "captura_pantalla", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": null}
+        {"action": "captura_pantalla"}
 
         Usuario: "apagá el wifi"
-        {"action": "wifi", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "bajar"}
+        {"action": "wifi", "cantidad": "bajar"}
 
         Usuario: "desconectá el wifi"
-        {"action": "wifi", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "bajar"}
+        {"action": "wifi", "cantidad": "bajar"}
 
         Usuario: "prendé el bluetooth"
-        {"action": "bluetooth", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "subir"}
+        {"action": "bluetooth", "cantidad": "subir"}
 
         Usuario: "activá el bluetooth"
-        {"action": "bluetooth", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "subir"}
+        {"action": "bluetooth", "cantidad": "subir"}
+
+        Usuario: "apagá el bluetooth"
+        {"action": "bluetooth", "cantidad": "bajar"}
 
         Usuario: "suspendé la compu"
-        {"action": "energia", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "suspender"}
+        {"action": "energia", "cantidad": "suspender"}
 
         Usuario: "poné la compu a dormir"
-        {"action": "energia", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "suspender"}
+        {"action": "energia", "cantidad": "suspender"}
 
         Usuario: "apagá el equipo"
-        {"action": "energia", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "apagar"}
+        {"action": "energia", "cantidad": "apagar"}
 
         Usuario: "reiniciá la máquina"
-        {"action": "energia", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "reiniciar"}
+        {"action": "energia", "cantidad": "reiniciar"}
 
         Usuario: "hola"
-        {"action": "saludo", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "saludo"}
 
         Usuario: "buenos días niri"
-        {"action": "saludo", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "saludo"}
 
         Usuario: "contame un chiste"
-        {"action": "chiste", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "chiste"}
 
         Usuario: "chau niri"
-        {"action": "despedida", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "despedida"}
 
         Usuario: "nos vemos"
-        {"action": "despedida", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "despedida"}
 
         Usuario: "qué hora es"
-        {"action": "ninguna", "ruta_base": "", "nombre": null, "destino": null, "contenido": null}
+        {"action": "ninguna"}
 
         Usuario: "cuánto es 340 más 128"
-        {"action": "calculo", "ruta_base": "", "nombre": null, "destino": null, "contenido": "340 + 128", "cantidad": null}
+        {"action": "calculo", "contenido": "340 + 128"}
 
         Usuario: "cuánto es 10 por 5 menos 2"
-        {"action": "calculo", "ruta_base": "", "nombre": null, "destino": null, "contenido": "10 * 5 - 2", "cantidad": null}
+        {"action": "calculo", "contenido": "10 * 5 - 2"}
 
         Usuario: "a cuántos fahrenheit son 100 grados celsius"
-        {"action": "conversion", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "100 celsius a fahrenheit"}
+        {"action": "conversion", "cantidad": "100 celsius a fahrenheit"}
 
         Usuario: "convertime 5 kilómetros a millas"
-        {"action": "conversion", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "5 kilometros a millas"}
+        {"action": "conversion", "cantidad": "5 kilometros a millas"}
 
         Usuario: "traducime hola al inglés"
-        {"action": "traduccion", "ruta_base": "", "nombre": null, "destino": "inglés", "contenido": "hola", "cantidad": null}
+        {"action": "traduccion", "destino": "inglés", "contenido": "hola"}
 
         Usuario: "cómo se dice buenos días en portugués"
-        {"action": "traduccion", "ruta_base": "", "nombre": null, "destino": "portugués", "contenido": "buenos días", "cantidad": null}
+        {"action": "traduccion", "destino": "portugués", "contenido": "buenos días"}
 
         Usuario: "pausá la música"
-        {"action": "control_musica", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "pausar"}
+        {"action": "control_musica", "cantidad": "pausar"}
 
         Usuario: "parame la canción"
-        {"action": "control_musica", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "pausar"}
+        {"action": "control_musica", "cantidad": "pausar"}
 
         Usuario: "seguí reproduciendo"
-        {"action": "control_musica", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "reproducir"}
+        {"action": "control_musica", "cantidad": "reproducir"}
 
         Usuario: "pasá a la siguiente canción"
-        {"action": "control_musica", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "siguiente"}
+        {"action": "control_musica", "cantidad": "siguiente"}
 
         Usuario: "volvé a la canción anterior"
-        {"action": "control_musica", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "anterior"}
+        {"action": "control_musica", "cantidad": "anterior"}
+
+        Usuario: "apagá la música"
+        {"action": "control_musica", "cantidad": "pausar"}
 
         Usuario: "qué hora es"
-        {"action": "hora", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": null}
+        {"action": "hora"}
 
         Usuario: "avisame en 10 minutos"
-        {"action": "temporizador", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "10"}
+        {"action": "temporizador", "cantidad": "10"}
 
         Usuario: "poneme un temporizador de 5 minutos para las papas"
-        {"action": "temporizador", "ruta_base": "", "nombre": null, "destino": null, "contenido": "las papas", "cantidad": "5"}
+        {"action": "temporizador", "contenido": "las papas", "cantidad": "5"}
 
         Usuario: "ponéme una alarma a las 7:30"
-        {"action": "alarma", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": "7:30"}
+        {"action": "alarma", "cantidad": "7:30"}
 
         Usuario: "recordame llamar al dentista"
-        {"action": "recordatorio", "ruta_base": "", "nombre": null, "destino": null, "contenido": "llamar al dentista", "cantidad": null}
+        {"action": "recordatorio", "contenido": "llamar al dentista"}
 
         Usuario: "qué recordatorios tengo"
-        {"action": "recordatorio", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": null}
+        {"action": "recordatorio"}
 
         Usuario: "anotá que tengo que comprar leche"
-        {"action": "nota", "ruta_base": "", "nombre": null, "destino": null, "contenido": "comprar leche", "cantidad": null}
+        {"action": "nota", "contenido": "comprar leche"}
 
         Usuario: "qué notas tengo guardadas"
-        {"action": "nota", "ruta_base": "", "nombre": null, "destino": null, "contenido": null, "cantidad": null}
+        {"action": "nota"}
         """.strip()
+
+    def _vigilar_margen_de_contexto(self) -> None:
+        """
+        Avisa si el prompt está por comerse la ventana de contexto.
+
+        Existe porque el modo de falla es silencioso: Ollama trunca el prompt por
+        el principio y responde igual, así que la única señal sería que el
+        asistente empieza a entender peor sin motivo aparente.
+        """
+        if self._margen_avisado:
+            return
+        usados = self.last_metrics.get("prompt_tokens") or 0
+        if not usados:
+            return
+        libre = 1 - (usados / NUM_CTX)
+        if libre < MARGEN_MINIMO:
+            self._margen_avisado = True
+            logger.warning(
+                f"Margen de contexto bajo: el prompt usa {usados} de {NUM_CTX} tokens "
+                f"({libre:.0%} libre, mínimo {MARGEN_MINIMO:.0%}). Si crece más, Ollama "
+                "va a truncarlo en silencio y la comprensión va a empeorar sin error visible."
+            )
+        else:
+            self._margen_avisado = True
+            logger.info(f"Contexto: prompt {usados}/{NUM_CTX} tokens ({libre:.0%} libre).")
 
     def parse(self, text: str) -> FileAction:
         logger.info(f"Parsing NLU intent for text: '{text}'")
@@ -249,16 +436,26 @@ class NLU:
                     {'role': 'user', 'content': text}
                 ],
                 format=FileAction.model_json_schema(),
-                options={"temperature": 0.1},
+                # temperature=0 (greedy) en vez de 0.1: esto es clasificación
+                # contra un enum cerrado, no generación creativa. Con 0.1 medimos
+                # que "a cuántos fahrenheit son 100 grados celsius" alternaba
+                # entre 'conversion' y 'calculo' en corridas idénticas; con 0 la
+                # misma orden da siempre la misma acción, que es lo que hace
+                # reproducible al banco de evaluación y auditable al asistente.
+                options={"temperature": 0.0, "num_ctx": NUM_CTX},
                 keep_alive="30m" # mantiene el modelo cargado entre invocaciones para evitar recargas de ~1-2 min
             )
             
+            self.last_metrics = _extract_metrics(response)
+            self._vigilar_margen_de_contexto()
+
             content = response.message.content
             # Convert JSON response back to Pydantic object
             data = json.loads(content)
-            action = FileAction(**data)
+            action = corregir_intencion(text, FileAction(**data))
             logger.info(f"Parsed action: {action}")
             return action
         except Exception as e:
             logger.error(f"Failed to parse NLU intent: {e}")
+            self.last_metrics = {}
             return FileAction(action="ninguna", ruta_base="")

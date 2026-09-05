@@ -1,75 +1,234 @@
 import queue
+import time
 import sounddevice as sd
 import numpy as np
-import scipy.signal
 from src.config import SAMPLE_RATE, CAPTURE_SAMPLE_RATE, CHANNELS, AUDIO_DEVICE
 from src.logger import get_logger
 
 logger = get_logger("AudioStream")
 
+# Nombres de los dispositivos mediados por el servidor de sonido. Se prueban
+# después del default porque siguen la fuente que el usuario eligió en el
+# escritorio, así que cuando el micrófono USB está enchufado, es el que usan.
+_DISPOSITIVOS_DE_SERVIDOR = ("pipewire", "pulse", "sysdefault")
+
+# Segundos sin un solo chunk del callback antes de dar por perdido el dispositivo.
+# Un chunk llega cada pocos milisegundos mientras la placa esté viva, así que 5 s
+# solo se cumplen si el micrófono desapareció (desenchufado, o el servidor de
+# sonido lo soltó).
+TIMEOUT_DISPOSITIVO_S = 5.0
+
+
+class AudioDeviceUnavailable(RuntimeError):
+    """No hay ningún dispositivo de entrada utilizable en este momento."""
+
+
+class AudioDeviceLost(RuntimeError):
+    """El dispositivo estaba abierto y dejó de entregar audio."""
+
+
+def _es_hardware_real(nombre: str) -> bool:
+    """
+    True si el nombre corresponde a una placa de captura y no a un plugin de ALSA.
+
+    ALSA expone como "dispositivos de entrada" un montón de plugins de proceso
+    (lavrate, speexrate, upmix, vdownmix...) que no son micrófonos. Además de
+    inútiles son peligrosos: abrirlos a ciegas para probarlos hace segfaultear a
+    PortAudio (verificado en este equipo), así que nunca entran a la lista.
+    """
+    return "(hw:" in nombre
+
+
+def _candidatos(preferido) -> list:
+    """
+    Dispositivos de entrada a probar, en orden de preferencia.
+
+    El orden importa: primero lo que el usuario configuró, después el default del
+    sistema —que es el que sigue al micrófono USB cuando está enchufado— y recién
+    al final las placas concretas. Así el USB gana cuando está, y el micrófono
+    interno queda como red cuando no.
+    """
+    candidatos = []
+    if preferido is not None:
+        candidatos.append(preferido)
+    candidatos.append(None)  # default del sistema
+
+    try:
+        dispositivos = list(sd.query_devices())
+    except Exception as e:
+        logger.warning(f"No se pudo enumerar dispositivos de audio: {e}")
+        return candidatos
+
+    por_nombre = {}
+    for indice, d in enumerate(dispositivos):
+        if d["max_input_channels"] < 1:
+            continue
+        por_nombre.setdefault(d["name"].lower(), indice)
+
+    for nombre in _DISPOSITIVOS_DE_SERVIDOR:
+        if nombre in por_nombre:
+            candidatos.append(por_nombre[nombre])
+
+    for indice, d in enumerate(dispositivos):
+        if d["max_input_channels"] >= 1 and _es_hardware_real(d["name"]):
+            candidatos.append(indice)
+
+    # Sin duplicados, conservando el orden.
+    vistos, unicos = set(), []
+    for c in candidatos:
+        clave = repr(c)
+        if clave not in vistos:
+            vistos.add(clave)
+            unicos.append(c)
+    return unicos
+
+
+def _resolver_por_nombre(nombre: str):
+    """Traduce un nombre parcial de dispositivo a su índice, o None si no está."""
+    try:
+        for indice, d in enumerate(sd.query_devices()):
+            if nombre.lower() in d["name"].lower() and d["max_input_channels"] > 0:
+                return indice
+    except Exception as e:
+        logger.warning(f"No se pudo buscar el dispositivo {nombre!r}: {e}")
+    return None
+
+
+def _descripcion(dispositivo) -> str:
+    if dispositivo is None:
+        return "default del sistema"
+    try:
+        return f"[{dispositivo}] {sd.query_devices(dispositivo)['name']}"
+    except Exception:
+        return str(dispositivo)
+
+
 class AudioStream:
     def __init__(self, device=AUDIO_DEVICE):
-        self.device = device
+        # `device` es una preferencia, no una promesa: el dispositivo real se
+        # elige en cada start(), porque el micrófono USB no siempre está
+        # conectado y el default del sistema falla cuando no hay ninguna fuente.
+        self.preferido = device
+        self.device = None
         self.q = queue.Queue()
         self.stream = None
         self.buffer = np.array([], dtype=np.int16)
-        
-        # Determine actual device index/name if possible
-        try:
-            # We look for a device matching the name or string
-            if isinstance(self.device, str):
-                devices = sd.query_devices()
-                match_id = None
-                for i, d in enumerate(devices):
-                    if self.device.lower() in d['name'].lower() and d['max_input_channels'] > 0:
-                        match_id = i
-                        break
-                if match_id is not None:
-                    self.device = match_id
-            logger.info(f"Using audio device: {self.device}")
-        except Exception as e:
-            logger.warning(f"Failed to query device, using as is: {e}")
+
+        if isinstance(self.preferido, str):
+            self.preferido = _resolver_por_nombre(self.preferido)
 
     def callback(self, indata, frames, time, status):
         if status:
             logger.warning(f"Audio status: {status}")
-        
+
         # Obtenemos la data original (shape: frames, channels)
         raw_data = indata.copy()[:, 0]
-        
+
         # Remuestreo simple (decimation) para mantener la continuidad de fase entre chunks
         if CAPTURE_SAMPLE_RATE != SAMPLE_RATE:
             factor = CAPTURE_SAMPLE_RATE // SAMPLE_RATE
             resampled_data = raw_data[::factor]
         else:
             resampled_data = raw_data
-            
+
         self.q.put(resampled_data)
-        
-    def start(self):
-        logger.info(f"Starting audio stream... (Captura: {CAPTURE_SAMPLE_RATE}Hz, Salida: {SAMPLE_RATE}Hz)")
-        self.stream = sd.InputStream(
-            device=self.device,
-            samplerate=CAPTURE_SAMPLE_RATE,
-            channels=CHANNELS,
-            dtype='int16',
-            callback=self.callback
-        )
-        self.stream.start()
-        
+
+    def _abrir(self, dispositivo) -> bool:
+        """Intenta abrir un dispositivo concreto. True si quedó andando."""
+        try:
+            # check_input_settings valida sin abrir el stream. Se hace primero
+            # porque abrir un dispositivo inválido puede tumbar el proceso entero.
+            sd.check_input_settings(device=dispositivo, samplerate=CAPTURE_SAMPLE_RATE,
+                                     channels=CHANNELS, dtype="int16")
+            stream = sd.InputStream(
+                device=dispositivo,
+                samplerate=CAPTURE_SAMPLE_RATE,
+                channels=CHANNELS,
+                dtype="int16",
+                callback=self.callback,
+            )
+            stream.start()
+        except Exception as e:
+            logger.debug(f"Descartado {_descripcion(dispositivo)}: {str(e).splitlines()[0]}")
+            return False
+
+        self.stream = stream
+        self.device = dispositivo
+        return True
+
+    def start(self, esperar: bool = True, intervalo_espera: float = 5.0):
+        """
+        Abre el primer dispositivo de entrada que realmente funcione.
+
+        Con `esperar=True` no se rinde si no hay ninguno: reintenta cada
+        `intervalo_espera` segundos, volviendo a enumerar cada vez, así que
+        enchufar el micrófono lo levanta solo. Sin esto, el servicio moría con
+        `Restart=on-failure` y entraba en un bucle que recargaba Whisper cada
+        pocos segundos (visto en producción al desconectar el micrófono USB).
+        """
+        aviso_emitido = False
+        while True:
+            for dispositivo in _candidatos(self.preferido):
+                if self._abrir(dispositivo):
+                    logger.info(
+                        f"Entrada de audio: {_descripcion(dispositivo)} "
+                        f"(captura {CAPTURE_SAMPLE_RATE}Hz, salida {SAMPLE_RATE}Hz)"
+                    )
+                    return
+
+            if not esperar:
+                raise AudioDeviceUnavailable(
+                    "No hay ningún dispositivo de entrada disponible a "
+                    f"{CAPTURE_SAMPLE_RATE}Hz."
+                )
+            if not aviso_emitido:
+                aviso_emitido = True
+                logger.warning(
+                    "No encontré ningún micrófono utilizable. Esperando a que "
+                    f"aparezca uno (reintento cada {intervalo_espera:.0f}s)."
+                )
+            time.sleep(intervalo_espera)
+
+    def reset_buffers(self):
+        """
+        Descarta el audio pendiente (cola del callback y buffer parcial).
+
+        Lo usa MainLoop al reabrir el dispositivo: lo que quedó en la cola es de
+        antes del corte y mezclarlo con lo nuevo produciría una orden partida al
+        medio.
+        """
+        self.q.queue.clear()
+        self.buffer = np.array([], dtype=np.int16)
+
     def stop(self):
         logger.info("Stopping audio stream...")
         if self.stream:
-            self.stream.stop()
-            self.stream.close()
-            
+            try:
+                self.stream.stop()
+                self.stream.close()
+            except Exception as e:
+                logger.warning(f"Error cerrando el stream de audio: {e}")
+            self.stream = None
+
     def read_chunk(self, size: int) -> np.ndarray:
-        """Read exactly `size` samples from the audio stream"""
-        # If we already have enough in the buffer, take it
+        """
+        Read exactly `size` samples from the audio stream.
+
+        Si el dispositivo deja de entregar audio (típicamente porque lo
+        desenchufaron), la cola se seca y esta función colgaría para siempre.
+        Por eso el get() tiene timeout y levanta AudioDeviceLost: MainLoop lo
+        atrapa y vuelve a elegir dispositivo en vez de quedarse mudo.
+        """
         while len(self.buffer) < size:
-            new_data = self.q.get()
+            try:
+                new_data = self.q.get(timeout=TIMEOUT_DISPOSITIVO_S)
+            except queue.Empty:
+                raise AudioDeviceLost(
+                    f"El dispositivo de entrada dejó de entregar audio "
+                    f"({TIMEOUT_DISPOSITIVO_S:.0f}s sin datos)."
+                ) from None
             self.buffer = np.concatenate((self.buffer, new_data))
-            
+
         chunk = self.buffer[:size]
         self.buffer = self.buffer[size:]
         return chunk
