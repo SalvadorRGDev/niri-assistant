@@ -285,6 +285,12 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 <!-- Hechos técnicos verificados. Formato: AAAA-MM-DD — hecho — porqué importa. -->
 
+- **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
+  Con Ollama apagado, `test_pipeline.py` no falla: el NLU devuelve `action='ninguna'`
+  y el asistente responde "No entendí la acción", que parece un problema de
+  comprensión y no de infraestructura. Antes de diagnosticar cualquier cosa del NLU,
+  verificar `systemctl is-active ollama`. Levantarlo requiere `sudo`, así que es un
+  paso del usuario (§3.1.1).
 - **2026-09-04 — No hay `npm`, `black` ni `pytest` en el sistema.** Las pruebas son
   scripts sueltos ejecutados con el Python del venv. Invocar herramientas inexistentes
   quema turnos y da falsa sensación de verificación.
