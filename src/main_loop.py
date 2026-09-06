@@ -28,6 +28,14 @@ logger = get_logger("MainLoop")
 
 VAD_CHUNK_SAMPLES = 512  # 32ms a 16kHz, tamaño fijo que exige Silero VAD
 
+# Techo de duración de una orden. Medido sobre 54 grabaciones reales del usuario,
+# la mediana es 2.80 s y la más larga 5.18 s, así que 12 s deja más del doble de
+# margen sobre el peor caso real. Existe porque el VAD no siempre encuentra el
+# silencio: con sonido ambiente parecido a voz llegó a grabar 25.66 s seguidos,
+# que después Whisper transcribe entero para terminar descartándolo. El tope
+# acota ese desperdicio sin cortar ninguna orden plausible.
+MAX_UTTERANCE_SECONDS = 12.0
+
 # Acciones sobre un archivo/carpeta EXISTENTE: hay que ubicarlo (en vez de
 # preguntar dónde crearlo).
 LOCATE_EXISTING_ACTIONS = {"eliminar", "mover", "leer"}
@@ -106,10 +114,22 @@ class MainLoop:
         has_spoken = False
         max_prob_seen = 0.0
         max_wait_chunks = int(max_wait_seconds * SAMPLE_RATE / VAD_CHUNK_SAMPLES)
+        max_utterance_chunks = int(MAX_UTTERANCE_SECONDS * SAMPLE_RATE / VAD_CHUNK_SAMPLES)
 
         while True:
             chunk = self.audio.read_chunk(VAD_CHUNK_SAMPLES)
             current_utterance.append(chunk)
+
+            if len(current_utterance) >= max_utterance_chunks:
+                # Se devuelve lo capturado en vez de descartarlo: una orden con
+                # contenido largo ("creá un archivo que diga...") es rara pero
+                # posible, y el filtro de confianza del STT ya descarta el ruido.
+                logger.warning(
+                    f"Corte por duración máxima ({MAX_UTTERANCE_SECONDS:.0f}s) sin que el VAD "
+                    f"encontrara silencio (prob. máx. vista: {max_prob_seen:.3f}). "
+                    "Suele ser ruido ambiente parecido a voz."
+                )
+                return np.concatenate(current_utterance) if has_spoken else None
 
             prob = self.vad.process_chunk(chunk)
             if prob > max_prob_seen:
@@ -418,6 +438,7 @@ class MainLoop:
                         self.turno = TurnoMetricas()
                         accion_del_turno = None
                         origen_intencion = None
+                        falso_positivo = False
 
                         with self._medir("vad"):
                             utterance_audio = self.capture_utterance(max_wait_seconds=3.0)
@@ -445,6 +466,10 @@ class MainLoop:
                                 accion_del_turno = action.action
                                 self._dispatch_action(action, text)
                             else:
+                                # El wake word disparó pero no hubo ninguna orden
+                                # entendible: casi siempre es un falso positivo
+                                # del wake word. Se anota para medir la tasa.
+                                falso_positivo = True
                                 logger.info("Discarding empty or noise-only transcription.")
 
                         # Una línea por turno en logs/metrics.jsonl. Los tokens
@@ -455,6 +480,7 @@ class MainLoop:
                         self.turno.registrar(
                             accion=accion_del_turno,
                             origen=origen_intencion,
+                            falso_positivo=falso_positivo or None,
                             audio_s=(round(len(utterance_audio) / SAMPLE_RATE, 2)
                                      if utterance_audio is not None else None),
                             tokens_prompt=tokens.get("prompt_tokens"),

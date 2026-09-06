@@ -93,6 +93,11 @@ def main() -> int:
     if salidas:
         print(f"\n  tokens de salida del NLU: p50 {percentil(salidas, .50):.0f} · p95 {percentil(salidas, .95):.0f}")
 
+    falsos = sum(1 for t in turnos if t.get("falso_positivo"))
+    if falsos:
+        print(f"\n  wake word sin orden entendible: {falsos}/{len(turnos)} turnos "
+              f"({falsos / len(turnos):.0%}) — probables falsos positivos")
+
     resueltos = Counter(t.get("origen") for t in turnos if t.get("origen"))
     if resueltos:
         con_orden = sum(resueltos.values())

@@ -163,14 +163,8 @@ def probar_fail_safe_de_confirmacion():
 
 def probar_auditoria():
     print("\n§4.6 — Toda acción que no es de archivos queda auditada")
-    with tempfile.TemporaryDirectory() as tmp:
-        original = audit_mod.AUDIT_LOG_PATH
-        audit_mod.AUDIT_LOG_PATH = Path(tmp) / "audit.log"
-        try:
-            dispatch_mod.dispatch(accion(action="energia", cantidad="apagar"), raw_text="apagá todo")
-            contenido = audit_mod.AUDIT_LOG_PATH.read_text(encoding="utf-8")
-        finally:
-            audit_mod.AUDIT_LOG_PATH = original
+    dispatch_mod.dispatch(accion(action="energia", cantidad="apagar"), raw_text="apagá todo")
+    contenido = audit_mod.AUDIT_LOG_PATH.read_text(encoding="utf-8")
     verificar("el intento bloqueado por confirmación queda registrado",
               "energia" in contenido and "requiere_confirmacion" in contenido)
     verificar("el log guarda la transcripción original", "apagá todo" in contenido)
@@ -179,14 +173,25 @@ def probar_auditoria():
 def main() -> int:
     system_actions._run = _run_falso  # ninguna prueba llega al sistema real
     print("Suite de seguridad de Niri — nada se ejecuta de verdad (`_run` es un doble)")
-    probar_confirmacion_de_energia()
-    probar_aparatos_no_son_energia()
-    probar_direccion_de_aparatos()
-    probar_alias_de_musica()
-    probar_confirmacion_de_archivos()
-    probar_whitelist_de_rutas()
-    probar_fail_safe_de_confirmacion()
-    probar_auditoria()
+
+    # La suite se lleva SU log de auditoría a un temporal. El de producción
+    # (logs/audit.log) es el registro de lo que el usuario pidió de verdad: con
+    # las corridas de esta suite adentro, medir sobre él da cualquier cosa —
+    # llegó a tener 32 'energia' que nunca nadie dijo en voz alta.
+    audit_original = audit_mod.AUDIT_LOG_PATH
+    with tempfile.TemporaryDirectory() as tmp:
+        audit_mod.AUDIT_LOG_PATH = Path(tmp) / "audit.log"
+        try:
+            probar_confirmacion_de_energia()
+            probar_aparatos_no_son_energia()
+            probar_direccion_de_aparatos()
+            probar_alias_de_musica()
+            probar_confirmacion_de_archivos()
+            probar_whitelist_de_rutas()
+            probar_fail_safe_de_confirmacion()
+            probar_auditoria()
+        finally:
+            audit_mod.AUDIT_LOG_PATH = audit_original
 
     print(f"\n{len(_fallos)} fallos de {_corridas} verificaciones")
     for f in _fallos:

@@ -351,6 +351,15 @@ Una tarea no está terminada hasta que, **en este orden**:
   seguridad). Ahora son `.venv/bin/python`, §2 las invoca igual y suma los comandos
   de verificación; `eval/casos.jsonl`, `eval/test_seguridad.py` y el baseline pasaron
   a `ask` por ser los postes del arco. Verificado con `jq -e` y 23 casos del hook.
+- **2026-09-05 — Falsos positivos del wake word con el micrófono interno.** 14
+  disparos en dos horas, con scores de 0.901 a **0.986**, y los 14 terminaron en
+  transcripción vacía: subir `WAKE_WORD_THRESHOLD` no los frena porque varios son
+  más confiados que un "oye niri" real. El micrófono interno capta 6 dB más fuerte
+  que el USB con el que se entrenó el modelo (−23.5 vs −29.0 dBFS), y Silero
+  clasifica ese ruido como voz el 43% del tiempo, más que el habla real (37%).
+  `AUDIO_GAIN` no es la palanca: con 1.0 o 3.0 el resultado es el mismo. La causa
+  es el modelo entrenado con otro micrófono; ninguna filtración de seguridad falló
+  (Whisper descartó todo), lo que se paga es CPU y disco.
 - **2026-09-05 — Fase 1: router determinista, hilos del STT y precalentado.**
   `src/router.py` resuelve por regex las órdenes de vocabulario cerrado (volumen,
   brillo, wifi, bluetooth, música, hora, captura, saludo, despedida, chiste) sin
