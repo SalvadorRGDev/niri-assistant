@@ -55,8 +55,14 @@
 **No existen `npm`, `black` ni `pytest` en este sistema.** No los invoques.
 Todo corre con el intérprete del venv (Python 3.14):
 
+Las rutas de abajo son **relativas a la raíz del repo**, y eso no es cosmético:
+las reglas de permisos de `.claude/settings.json` (§5.1) matchean el comando tal
+como se escribe. Con rutas absolutas quedaban atadas a una máquina; escritas así
+funcionan en cualquier clon. Corolario: hay que invocarlas desde la raíz del
+proyecto, sin `cd` previo.
+
 ```bash
-PY=/home/salvadorrg/Proyectos/Asistente/.venv/bin/python
+PY=.venv/bin/python
 
 # Dependencias
 $PY -m pip install -r requirements.txt
@@ -67,9 +73,15 @@ $PY main.py
 # Prueba end-to-end sin micrófono (NLU + ejecutor + TTS por texto)
 $PY test_pipeline.py "Crea una carpeta llamada pruebas_nlu"
 
-# Pruebas de audio
+# Pruebas de audio (requieren el micrófono libre, ver aviso abajo)
 $PY test_phase1.py      # consumo de CPU en IDLE
 $PY test_mic_vad.py     # captura + VAD
+
+# Verificación de §7 — ninguna de estas toca el micrófono ni la red
+$PY eval/run.py                # banco de 66 órdenes contra el baseline; sale 1 si hay regresiones
+$PY eval/test_seguridad.py     # 46 checks de los invariantes de §4
+$PY eval/test_audio.py         # 22 checks de la selección de dispositivo de entrada
+$PY eval/resumen_metricas.py   # p50/p95 por etapa sobre logs/metrics.jsonl
 
 # Servicio
 systemctl --user status|stop|start|restart niri.service
@@ -99,7 +111,8 @@ Orden de precedencia ante conflicto: **§3.1 > §3.2 > §4 > §3.3 > todo lo dem
    con privilegios de root.** Si algo lo requiere (ej. `sudo pacman -S ollama-vulkan`),
    entrégalo al usuario como comando a correr él, con una línea de justificación.
 2. **Nunca borres, muevas ni sobrescribas archivos fuera de este repositorio**
-   (`/home/salvadorrg/Proyectos/Asistente`). En particular: nada de `rm` sobre
+   (el directorio de trabajo del proyecto, el que contiene este `CLAUDE.md`).
+   En particular: nada de `rm` sobre
    `~/Proyectos`, `~/Clases`, `~/.config`, ni sobre `models/`, `data/` o `logs/`.
 3. **Nunca borres `recordings/`, `logs/audit.log`, `data/*.json` ni `models/*.onnx`.**
    Son datos irreproducibles: voz real del usuario, historial de auditoría, estado
@@ -205,15 +218,17 @@ harness aplica antes de ejecutar nada. Si editás §3, editá también ese archi
 | Lista | Contenido | Corresponde a |
 |---|---|---|
 | `deny` (bloqueo duro, sin prompt) | `sudo`, `doas`, `pacman`, `yay`, `paru`; `rm`, `rmdir`, `shred`, `truncate`, `dd`; edición de `recordings/`, `logs/`, `data/`, `models/`, `.venv/` | §3.1.1, §3.1.2, §3.1.3 |
-| `ask` (pregunta siempre) | `src/config.py`, `src/executor.py`, `src/paths.py`, `src/confirm.py`, `src/schemas.py`, `src/app_registry.py`, `requirements.txt`, `niri.service`, el propio `settings.json`; `pip install` | §3.2 |
-| `allow` (sin prompt) | Lectura e inspección (`ls`, `cat`, `grep`, `find`, `jq`…), `systemctl --user`, `journalctl`, los cuatro scripts de prueba con el Python del venv, edición de los módulos no críticos de `src/` y de los `.md` | §2, §3.3 |
+| `ask` (pregunta siempre) | `src/config.py`, `src/executor.py`, `src/paths.py`, `src/confirm.py`, `src/schemas.py`, `src/app_registry.py`, `requirements.txt`, `niri.service`, el propio `settings.json`; `pip install`; y los postes del arco: `eval/casos.jsonl`, `eval/test_seguridad.py`, `eval/resultados/baseline.json` | §3.2 |
+| `allow` (sin prompt) | Lectura e inspección (`ls`, `cat`, `grep`, `find`, `jq`…), `systemctl --user`, `journalctl`, los scripts de prueba y de verificación con `.venv/bin/python`, edición de los módulos no críticos de `src/`, de las herramientas de `eval/` y de los `.md` | §2, §3.3 |
 
 Además hay un hook `PreToolUse` sobre `Bash` que inspecciona el comando completo y
 deniega privilegios de root o cualquier `rm`/`mv`/`truncate` que apunte a los
 directorios de datos irreproducibles. Existe porque las reglas de permisos solo
 matchean por prefijo y no pueden expresar "cualquier comando que toque
-`recordings/`". Verificado contra 14 casos (7 que deben bloquearse, 7 que deben
-pasar) el 2026-09-04.
+`recordings/`". Verificado contra 23 casos (11 que deben bloquearse, 12 que deben
+pasar) el 2026-09-05. Nota práctica: el hook inspecciona el comando entero, así que
+un comando de Bash que solo *mencione* `sudo` o `rm recordings/` como texto también
+se bloquea. Para probarlo hay que pasarle los casos desde un archivo, no inline.
 
 **Ausencia declarada:** no existen skills de despliegue ni de rollback automático. El
 control de versiones sí existe desde 2026-09-04, así que un error en código o
@@ -323,6 +338,12 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 <!-- AAAA-MM-DD — qué cambió — archivos — cómo se verificó. Máx. ~20 líneas. -->
 
+- **2026-09-05 — Rutas relativas en el harness de permisos.** Las 7 rutas absolutas
+  al venv de `.claude/settings.json` no matchean en otro clon y dejaban la allowlist
+  muerta (el `deny` y el hook no dependen de rutas: se perdía comodidad, no
+  seguridad). Ahora son `.venv/bin/python`, §2 las invoca igual y suma los comandos
+  de verificación; `eval/casos.jsonl`, `eval/test_seguridad.py` y el baseline pasaron
+  a `ask` por ser los postes del arco. Verificado con `jq -e` y 23 casos del hook.
 - **2026-09-05 — Fase 0: banco de evaluación, métricas y las correcciones que
   encontró.** Nuevos: `eval/casos.jsonl` (66 órdenes con su `FileAction` esperado),
   `eval/run.py` (compara contra `eval/resultados/baseline.json`, código 1 si hay
