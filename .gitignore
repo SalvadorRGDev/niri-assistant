@@ -11,8 +11,11 @@ logs/
 data/
 *.wav
 
-# Modelos descargados por el usuario (voces de Piper)
+# Modelos descargados por el usuario (no se versionan: pesan y se rebajan solos).
+# models/oye_niri.onnx y models/silero_vad.onnx SÍ están versionados porque son
+# chicos e irreemplazables — el wake word no tiene pipeline de reentrenamiento.
 models/piper/
+models/e5-small/
 
 # Artefactos de sesión y basura de herramientas
 :memory:*

@@ -192,6 +192,12 @@ class NLU:
         ese texto en 'contenido'. Si el usuario está PREGUNTANDO qué tiene guardado
         (ej. "qué notas tengo", "qué recordatorios tengo"), dejá 'contenido' vacío.
 
+        Sobre 'buscar' (encontrar un archivo del que el usuario NO recuerda el
+        nombre exacto: "dónde dejé...", "buscá el archivo de...", "encontrame lo
+        de..."): 'contenido' es lo que describe al archivo, sin las muletillas.
+        No confundir con 'listar' (mostrar lo que hay en una carpeta) ni con
+        'leer' (abrir un archivo cuyo nombre exacto SÍ dijo el usuario).
+
         Sobre 'abrir_aplicacion': 'nombre' es el nombre de la aplicación tal como la dijo
         el usuario (ej. "spotify", "discord", "antigravity", "brave", "navegador").
         Sobre 'ejecutar_rutina': 'nombre' es el nombre de la rutina (ej. "modo programador").
@@ -249,6 +255,12 @@ class NLU:
 
         Usuario: "pasa el resumen.pdf a la carpeta clases"
         {"action": "mover", "ruta_base": "", "nombre": "resumen.pdf", "destino": "clases"}
+
+        Usuario: "donde deje el resumen de sistemas operativos"
+        {"action": "buscar", "ruta_base": "", "contenido": "resumen de sistemas operativos"}
+
+        Usuario: "buscame el archivo del presupuesto"
+        {"action": "buscar", "ruta_base": "", "contenido": "presupuesto"}
 
         Usuario: "lee el archivo readme"
         {"action": "leer", "ruta_base": "", "nombre": "readme"}

@@ -1,4 +1,5 @@
 import time
+import threading
 import wave
 import datetime
 import numpy as np
@@ -25,6 +26,12 @@ from src.logger import get_logger
 from src.config import RECORDINGS_DIR, BEEP_ON_WAKE_WORD, SAMPLE_RATE, CHANNELS
 
 logger = get_logger("MainLoop")
+
+# Cada cuánto se sincroniza el índice de búsqueda con el disco. Corre en un hilo
+# aparte: una corrida sin cambios tarda 4 ms, pero la primera indexación de un
+# árbol grande tarda segundos, y bloquear el bucle de audio significa perderse el
+# wake word.
+INTERVALO_INDICE_S = 600
 
 VAD_CHUNK_SAMPLES = 512  # 32ms a 16kHz, tamaño fijo que exige Silero VAD
 
@@ -154,6 +161,28 @@ class MainLoop:
                     return utterance_audio
                 logger.info("Utterance was too short, discarding.")
                 return None
+
+    def _arrancar_indexador(self):
+        """
+        Mantiene el índice de búsqueda al día en segundo plano.
+
+        Es un hilo daemon: si el asistente termina, muere con él sin dejar nada
+        a medio escribir (SQLite en WAL se recupera solo). Los errores se loguean
+        y el hilo sigue: que falle la indexación no puede tumbar el asistente.
+        """
+        def bucle():
+            from src.actions.busqueda import obtener_indice
+            while self.running:
+                try:
+                    obtener_indice().actualizar()
+                except Exception as e:
+                    logger.warning(f"No pude actualizar el índice de búsqueda: {e}")
+                for _ in range(INTERVALO_INDICE_S):
+                    if not self.running:
+                        return
+                    time.sleep(1)
+
+        threading.Thread(target=bucle, name="indexador", daemon=True).start()
 
     def _precalentar_nlu(self):
         """
@@ -410,6 +439,7 @@ class MainLoop:
         # Antes de abrir el micrófono: si no hay dispositivo, start() se queda
         # esperando, y no tiene sentido llegar caliente a un asistente sordo.
         self._precalentar_nlu()
+        self._arrancar_indexador()
         self.audio.start()
         logger.info("Assistant started. State: IDLE")
         last_timer_check = 0.0

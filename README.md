@@ -117,13 +117,39 @@ que el pipeline sea **100% local**:
 ```bash
 .venv/bin/python -m pip install piper-tts
 mkdir -p models/piper
-# Descargar una voz ES desde rhasspy/piper-voices (Hugging Face) y guardarla como:
-#   models/piper/es_MX.onnx
-#   models/piper/es_MX.onnx.json
+V=https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_MX/claude/high/es_MX-claude-high
+curl -L -o models/piper/es_MX.onnx      "$V.onnx"        # 60 MB
+curl -L -o models/piper/es_MX.onnx.json "$V.onnx.json"
 ```
+
+`src/tts.py` acepta **cualquier** `.onnx` que haya en `models/piper/`, así que la voz
+se puede bajar con su nombre original sin renombrarla. Se carga en memoria al arrancar
+(655 ms una vez) y a partir de ahí genera en **62 ms**: por subproceso serían ~826 ms,
+porque el modelo se relee en cada llamada.
 
 Después, `ALLOW_CLOUD_TTS_FALLBACK=false`. Sin Piper y sin internet, el sistema cae a
 `espeak-ng`, que siempre funciona pero suena robótico.
+
+### Búsqueda de archivos (opcional)
+
+Para que Niri responda "¿dónde dejé el resumen de sistemas operativos?" hace falta el
+codificador de embeddings. Sin él la búsqueda igual funciona, pero solo por palabras
+exactas (BM25):
+
+```bash
+mkdir -p models/e5-small
+E=https://huggingface.co/intfloat/multilingual-e5-small/resolve/main/onnx
+curl -L -o models/e5-small/model.onnx     "$E/model_qint8_avx512_vnni.onnx"  # 113 MB
+curl -L -o models/e5-small/tokenizer.json "$E/tokenizer.json"                #  16 MB
+curl -L -o models/e5-small/config.json    "$E/config.json"
+```
+
+Corre en CPU (935 textos/s, 3 ms por consulta) y **no toca la GPU**: los 4 GB ya están
+comprometidos con el NLU y el escritorio. El índice se arma solo en un hilo de fondo y
+vive en `data/indice.db`, que no se versiona. Solo indexa lo que hay bajo `~/Proyectos`
+y `~/Clases`, y excluye a propósito `recordings/`, `logs/`, `data/` y `models/`: son
+datos de runtime del asistente, no documentos, y `logs/audit.log` contiene
+transcripciones que no tienen por qué copiarse a otro archivo.
 
 ## Configuración
 

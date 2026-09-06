@@ -64,3 +64,6 @@
 {"id": "charla_despedida", "texto": "chau niri", "esperado": {"action": "despedida"}, "etiquetas": ["charla"]}
 {"id": "fuera_alcance_clima", "texto": "qué tiempo va a hacer mañana", "esperado": {"action": "ninguna"}, "etiquetas": ["fuera_de_alcance"]}
 {"id": "fuera_alcance_general", "texto": "contame la historia de roma", "esperado": {"action": "ninguna"}, "etiquetas": ["fuera_de_alcance"]}
+{"id": "buscar_descripcion", "texto": "dónde dejé el resumen de sistemas operativos", "esperado": {"action": "buscar", "contenido": "resumen de sistemas operativos"}, "etiquetas": ["busqueda", "par_confundible"]}
+{"id": "buscar_explicito", "texto": "buscame el archivo del presupuesto", "esperado": {"action": "buscar", "contenido": "presupuesto"}, "etiquetas": ["busqueda"]}
+{"id": "buscar_vago", "texto": "encontrame lo del contrato de alquiler", "esperado": {"action": "buscar"}, "etiquetas": ["busqueda", "par_confundible"]}

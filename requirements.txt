@@ -9,3 +9,4 @@ pydantic
 piper-tts       # TTS local (100% offline). Requiere ademas descargar una voz ES en models/piper/, ver README_PENDIENTES.md
 edge-tts        # voz de mujer en la nube (Elena), preferida por defecto cuando hay internet (ALLOW_CLOUD_TTS_FALLBACK=true)
 jeepney         # cliente D-Bus puro en Python (control de música vía MPRIS), sin dependencias de sistema
+tokenizers      # tokenizador del codificador de embeddings (src/embeddings.py); ya lo arrastra faster-whisper, se declara porque se importa directo

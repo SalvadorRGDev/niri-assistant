@@ -15,6 +15,7 @@ from src.actions import system as system_actions
 from src.actions import smalltalk as smalltalk_actions
 from src.actions import utils as utils_actions
 from src.actions import media as media_actions
+from src.actions import busqueda as busqueda_actions
 from src.actions import time_actions
 
 logger = get_logger("Actions.Dispatch")
@@ -44,6 +45,7 @@ NON_FILE_ACTIONS = {
     "calculo", "conversion", "traduccion",
     "control_musica",
     "hora", "temporizador", "alarma", "recordatorio", "nota",
+    "buscar",
 }
 
 _HANDLERS = {
@@ -68,6 +70,7 @@ _HANDLERS = {
     "alarma": time_actions.alarma,
     "recordatorio": time_actions.recordatorio,
     "nota": time_actions.nota,
+    "buscar": busqueda_actions.buscar,
 }
 
 

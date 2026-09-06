@@ -302,102 +302,56 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 - **2026-09-05 — En el NLU el costo está en la salida, y la ventana se llena en
   silencio.** El prefill es casi gratis con la cache de prefijo caliente (3823 tokens
-  en 0.05 s) y caro en frío (1.75 s), mientras que cada token generado cuesta ~15 ms.
-  Por eso se borraron las claves nulas de los ejemplos: salida de 36 a 17 tokens y
-  p50 de 662 a 310 ms sin perder exactitud. Al crecer el prompt, ojo: si no entra en
-  `num_ctx`, Ollama lo trunca por el principio **sin ningún error visible**. Hoy son
-  3245 de 5120 tokens y `src/nlu.py` avisa al arrancar si el margen baja del 25%.
-- **2026-09-05 — Para medir el STT hacen falta las 54 grabaciones, no 8.** El piso
-  de ruido es alto: la MISMA configuración corrida dos veces da 53/54 transcripciones
-  iguales, así que cualquier comparación por debajo de eso no dice nada. Con 8
-  grabaciones, `beam_size=1` parecía 14% más rápido y 8/8 idéntico; con las 54 resultó
-  36/54 y encima más lento en total. Set fijo (`recordings/` anteriores a la fecha de
-  la prueba, porque el servicio agrega archivos nuevos) y cada configuración en su
-  propio proceso: dos `WhisperModel` en el mismo intérprete se pelean los hilos.
-- **2026-09-05 — El micrófono no es un dispositivo fijo y el `default` puede no
-  existir.** Al desconectar el micrófono USB, PipeWire se quedó sin ninguna fuente
-  de audio y el `default` del sistema dejó de abrir (`PaErrorCode -9999` / ALSA -2):
-  el servicio moría y `Restart=on-failure` lo convertía en un bucle que recargaba
-  Whisper cada 12 s. Además, sondear dispositivos ALSA abriéndolos hace
-  **segfaultear** a PortAudio con los plugins (`lavrate`, `upmix`…): usar
-  `sd.check_input_settings()` y filtrar a los que tienen `(hw:` en el nombre. Y un
-  `start()` fallido imprime ~10.000 líneas al **fd 2 desde C**, justo el
-  `RateLimitBurst` de journald: sin silenciar ese descriptor, systemd descarta todos
-  los logs del servicio y te deja sin diagnóstico.
-
+  en 0.05 s) y caro en frío (1.75 s); cada token generado cuesta ~15 ms. Por eso los
+  ejemplos del prompt no llevan claves nulas. Si el prompt no entra en `num_ctx`,
+  Ollama lo trunca por el principio **sin ningún error visible**: `src/nlu.py` avisa
+  al arrancar si el margen baja del 25%.
+- **2026-09-05 — Antes de medir una mejora, medir el piso de ruido.** El STT no es
+  determinista: la MISMA configuración corrida dos veces da 53/54 transcripciones
+  iguales. Con 8 grabaciones `beam_size=1` parecía 14% más rápido y 8/8 idéntico; con
+  las 54 dio 36/54 y encima más lento. Set fijo (grabaciones anteriores a la prueba,
+  porque el servicio agrega nuevas) y cada config en su propio proceso: dos
+  `WhisperModel` en un intérprete se pelean los hilos.
+- **2026-09-05 — Las similitudes de e5 se leen por orden, no por valor.** Todo cae
+  cerca de 0.8: el mejor match supera a la mediana por +0.036 cuando el archivo existe
+  y +0.033 cuando no, así que ningún umbral separa "lo encontré" de "no está". Sirven
+  el ranking (recall@1 = 9/10) y la señal binaria del BM25.
+- **2026-09-05 — En Piper el costo es cargar el modelo, no sintetizar.** Por
+  subproceso son ~826 ms por frase, casi independientes de su largo. Con
+  `PiperVoice.load()` una sola vez (655 ms) la síntesis baja a 62 ms.
+- **2026-09-05 — El micrófono no es fijo y el wake word está atado al que se entrenó.**
+  Sin el USB, PipeWire se queda sin fuentes y el `default` no abre (`PaErrorCode
+  -9999`); `src/audio.py` prueba candidatos y espera en vez de morir. Con el mic
+  interno (6 dB más caliente) hubo 14 falsos positivos en dos horas con scores de
+  hasta 0.986, así que subir el umbral no ayuda ni `AUDIO_GAIN` cambia nada. Ojo:
+  sondear dispositivos ALSA abriéndolos hace segfaultear a PortAudio, y un `start()`
+  fallido escribe ~10.000 líneas al fd 2 desde C — justo el `RateLimitBurst` de
+  journald, que entonces descarta todos los logs del servicio.
 - **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
-  Con Ollama apagado, `test_pipeline.py` no falla: el NLU devuelve `action='ninguna'`
-  y el asistente responde "No entendí la acción", que parece un problema de
-  comprensión y no de infraestructura. Antes de diagnosticar cualquier cosa del NLU,
-  verificar `systemctl is-active ollama`. Levantarlo requiere `sudo`, así que es un
-  paso del usuario (§3.1.1).
-- **2026-09-04 — No hay `npm`, `black` ni `pytest` en el sistema.** Las pruebas son
-  scripts sueltos ejecutados con el Python del venv. Invocar herramientas inexistentes
-  quema turnos y da falsa sensación de verificación.
-- **2026-09-04 — Python del proyecto es 3.14**, lo que descarta wheels de
-  `tflite-runtime` y TensorFlow. Por eso el wake word corre con `onnxruntime`
-  (`OnnxClassifier` en `src/wake_word.py`) y no con la ruta oficial de openWakeWord.
-- **2026-09-03 — Micrófono de acceso exclusivo, `AUDIO_GAIN` solo para el VAD, y
-  `CPUQuota` bajo rompiendo el VAD:** los tres están explicados en detalle en
-  `README.md` > Decisiones técnicas. Se sacaron de acá para no pagarlos dos veces.
+  Con Ollama apagado el NLU devuelve `action='ninguna'` y el asistente responde "no
+  entendí", que parece un problema de comprensión. Verificar `systemctl is-active
+  ollama` antes de diagnosticar el NLU; levantarlo requiere `sudo` (§3.1.1).
+- **2026-09-04 — No hay `npm`, `black` ni `pytest`**, y Python es **3.14** (sin wheels
+  de `tflite-runtime` ni TensorFlow, de ahí `onnxruntime` para el wake word).
+- **2026-09-03 — Micrófono de acceso exclusivo, `AUDIO_GAIN` solo para el VAD y
+  `CPUQuota` bajo rompiendo el VAD:** los tres están en `README.md` > Decisiones
+  técnicas.
 
 ## Historial de Cambios Recientes
 
 <!-- AAAA-MM-DD — qué cambió — archivos — cómo se verificó. Máx. ~20 líneas. -->
 
-- **2026-09-05 — Rutas relativas en el harness de permisos.** Las 7 rutas absolutas
-  al venv de `.claude/settings.json` no matchean en otro clon y dejaban la allowlist
-  muerta (el `deny` y el hook no dependen de rutas: se perdía comodidad, no
-  seguridad). Ahora son `.venv/bin/python`, §2 las invoca igual y suma los comandos
-  de verificación; `eval/casos.jsonl`, `eval/test_seguridad.py` y el baseline pasaron
-  a `ask` por ser los postes del arco. Verificado con `jq -e` y 23 casos del hook.
-- **2026-09-05 — En Piper el costo es cargar el modelo, no sintetizar.** Por
-  subproceso son ~826 ms por frase, casi independientes de su largo, porque el
-  `.onnx` de 63 MB se relee en cada llamada. Con `PiperVoice.load()` una sola vez al
-  arrancar (655 ms) la síntesis baja a **62 ms** de mediana, RTF 0.03x. Corolario:
-  la caché de respuestas fijas que preveía el plan no hace falta.
-- **2026-09-05 — Falsos positivos del wake word con el micrófono interno.** 14
-  disparos en dos horas, con scores de 0.901 a **0.986**, y los 14 terminaron en
-  transcripción vacía: subir `WAKE_WORD_THRESHOLD` no los frena porque varios son
-  más confiados que un "oye niri" real. El micrófono interno capta 6 dB más fuerte
-  que el USB con el que se entrenó el modelo (−23.5 vs −29.0 dBFS), y Silero
-  clasifica ese ruido como voz el 43% del tiempo, más que el habla real (37%).
-  `AUDIO_GAIN` no es la palanca: con 1.0 o 3.0 el resultado es el mismo. La causa
-  es el modelo entrenado con otro micrófono; ninguna filtración de seguridad falló
-  (Whisper descartó todo), lo que se paga es CPU y disco.
-- **2026-09-05 — Fase 2 (primera mitad): Piper local en proceso.** `piper-tts`
-  1.8.0 instalado (hay wheel `abi3`, sirve en 3.14) y voz `es_MX-claude-high`
-  (60 MB) en `models/piper/`. `src/tts.py` carga la voz en memoria al arrancar y
-  descubre sola tanto la voz (cualquier `.onnx` de la carpeta) como el binario
-  (al lado de `sys.executable`, porque el servicio no activa el venv).
-  Generación: 900 ms con edge-tts → **62 ms**. `test_pipeline.py` pasó a usar el
-  router y el dispatcher reales: antes mandaba todo al Executor y no verificaba
-  ninguna acción que no fuera de archivos. Verificado: suites 46/46 y 22/22,
-  tres órdenes end-to-end habladas y el servicio con Piper cargado.
-- **2026-09-05 — Fase 1: router determinista, hilos del STT y precalentado.**
-  `src/router.py` resuelve por regex las órdenes de vocabulario cerrado (volumen,
-  brillo, wifi, bluetooth, música, hora, captura, saludo, despedida, chiste) sin
-  tocar la GPU; usa `fullmatch` y se abstiene ante la duda, y nunca toca acciones
-  de archivos ni `energia`. Validado contra los mismos 66 casos del banco:
-  **22/66 (33%) resueltas sin LLM, 0 errores**, con `eval/run.py` fallando si el
-  router contesta mal. `src/stt.py` pasó a `cpu_threads=8` (~8% menos de tiempo,
-  idéntico dentro del ruido) pero **no** a `beam_size=1` (ver Aprendizajes), y
-  `MainLoop` precalienta el NLU al arrancar para que la primera orden no pague los
-  ~5 s de carga en frío. Verificado: las tres suites, `test_pipeline.py` y el
-  servicio reiniciado (precalentado en 0.34 s, sin errores).
-- **2026-09-05 — Fase 0: banco de evaluación, métricas y las correcciones que
-  encontró.** Nuevos: `eval/casos.jsonl` (66 órdenes con su `FileAction` esperado),
-  `eval/run.py` (compara contra `eval/resultados/baseline.json`, código 1 si hay
-  regresiones), `eval/test_seguridad.py` (46 checks de §4), `eval/test_audio.py`
-  (17), `src/metrics.py` (`logs/metrics.jsonl`, tiempos por etapa, sin transcripciones)
-  y `eval/resumen_metricas.py`. El banco destapó 7 fallos invisibles para el set de 12
-  casos: `crear_archivo` nunca se disparaba, "apagá el wifi" lo PRENDÍA y "apagá el
-  bluetooth" llegaba a `systemctl poweroff` sin confirmar. Arreglados en capas
-  (corrección determinista en `nlu.py`, confirmación por voz para `energia` y
-  auditoría de las acciones no-archivo en `dispatch.py`, `temperature=0`), más la
-  elección de dispositivo de entrada en `audio.py`. **65/66, p50 de 662 a 310 ms.**
-  Verificado con las tres suites, `test_pipeline.py` y el servicio sin errores.
+- **2026-09-05 — Fases 0, 1 y 2 del plan de optimización.** F0: banco de evaluación
+  (`eval/casos.jsonl`, 69 casos), `eval/run.py`, suites de seguridad y audio,
+  `src/metrics.py`. F1: `src/router.py` resuelve 22/69 órdenes sin LLM con 0 errores,
+  `cpu_threads=8` en el STT y precalentado del NLU. F2: Piper en proceso (62 ms) y
+  búsqueda híbrida local (`src/embeddings.py`, `src/indice.py`, acción `buscar`).
+  En el camino, el banco destapó que "apagá el bluetooth" llegaba a `systemctl
+  poweroff` sin confirmar: arreglado en capas (corrección determinista en el NLU,
+  confirmación por voz para `energia`, auditoría de las acciones no-archivo).
+  **69/69 acción+slots, p50 de 662 a ~320 ms.** El detalle de cada cambio está en los
+  mensajes de commit; verificado con las tres suites, `test_pipeline.py` y el servicio.
 - **Anterior a 2026-09-05:** fix de nombres reales de carpeta en `src/paths.py`,
-  consolidación de la documentación en `README.md`, puesta bajo git con licencia MIT
-  y harness v2 con `.claude/settings.json`. El detalle está en `git log` (§6.7).
+  consolidación de la documentación en `README.md`, git con licencia MIT y harness v2
+  con `.claude/settings.json`. Está en `git log` (§6.7).
   Pendiente manual: crear el repo en GitHub y hacer `push`.

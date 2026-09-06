@@ -1,19 +1,21 @@
 {
-  "fecha": "2026-09-05T17:12:25",
+  "fecha": "2026-09-05T19:48:46",
   "modelo": "qwen2.5:3b-instruct",
-  "total": 66,
-  "accion_ok": 65,
-  "slots_ok": 65,
-  "latencia_p50_ms": 312.5,
-  "latencia_p95_ms": 482.4,
-  "tokens_prompt": 3245,
-  "tokens_salida_mediana": 17.0,
-  "arranque_frio_s": 0.37,
+  "total": 69,
+  "accion_ok": 69,
+  "slots_ok": 69,
+  "latencia_p50_ms": 393.3,
+  "latencia_p95_ms": 547.9,
+  "tokens_prompt": 3428,
+  "tokens_salida_mediana": 18,
+  "router_cobertura": 22,
+  "router_errores": 0,
+  "arranque_frio_s": 0.44,
   "arranque_frio_detalle": {
-    "prompt_tokens": 3236,
+    "prompt_tokens": 3419,
     "output_tokens": 8,
-    "prefill_ms": 243.7,
-    "decode_ms": 107.4,
+    "prefill_ms": 308.7,
+    "decode_ms": 107.1,
     "load_ms": 0.8
   },
   "casos": [
@@ -33,9 +35,11 @@
         "ruta_base": "clases",
         "nombre": "tareas"
       },
-      "ms": 427.7,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 442.0,
       "tokens_salida": 25,
-      "tokens_prompt": 3245
+      "tokens_prompt": 3428
     },
     {
       "id": "arch_crear_sin_ubicacion",
@@ -52,9 +56,11 @@
         "action": "crear_carpeta",
         "nombre": "fotos"
       },
-      "ms": 379.1,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 423.3,
       "tokens_salida": 22,
-      "tokens_prompt": 3243
+      "tokens_prompt": 3426
     },
     {
       "id": "arch_crear_variante",
@@ -72,9 +78,11 @@
         "ruta_base": "proyectos",
         "nombre": "facturas"
       },
-      "ms": 429.3,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 470.2,
       "tokens_salida": 25,
-      "tokens_prompt": 3248
+      "tokens_prompt": 3431
     },
     {
       "id": "arch_crear_anidada",
@@ -92,9 +100,11 @@
         "ruta_base": "matematica",
         "nombre": "parciales"
       },
-      "ms": 458.1,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 507.0,
       "tokens_salida": 27,
-      "tokens_prompt": 3255
+      "tokens_prompt": 3438
     },
     {
       "id": "arch_crear_archivo",
@@ -112,9 +122,11 @@
         "ruta_base": "proyectos",
         "nombre": "notas.txt"
       },
-      "ms": 425.9,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 463.0,
       "tokens_salida": 25,
-      "tokens_prompt": 3244
+      "tokens_prompt": 3427
     },
     {
       "id": "arch_crear_archivo_sin_ubicacion",
@@ -131,9 +143,11 @@
         "action": "crear_archivo",
         "nombre": "lista.md"
       },
-      "ms": 367.0,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 406.9,
       "tokens_salida": 21,
-      "tokens_prompt": 3244
+      "tokens_prompt": 3427
     },
     {
       "id": "arch_crear_archivo_contenido",
@@ -152,9 +166,11 @@
         "nombre": "pendientes.txt",
         "contenido": "estudiar para el final"
       },
-      "ms": 590.1,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 658.8,
       "tokens_salida": 36,
-      "tokens_prompt": 3253
+      "tokens_prompt": 3436
     },
     {
       "id": "arch_eliminar_con_ubicacion",
@@ -173,9 +189,11 @@
         "ruta_base": "proyectos",
         "nombre": "notas.txt"
       },
-      "ms": 398.1,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 439.4,
       "tokens_salida": 23,
-      "tokens_prompt": 3242
+      "tokens_prompt": 3425
     },
     {
       "id": "arch_eliminar_sin_ubicacion",
@@ -193,9 +211,11 @@
         "action": "eliminar",
         "nombre": "viejo.zip"
       },
-      "ms": 350.7,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 390.1,
       "tokens_salida": 20,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "arch_eliminar_carpeta",
@@ -213,9 +233,11 @@
         "ruta_base": "clases",
         "nombre": "temporales"
       },
-      "ms": 398.8,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 440.1,
       "tokens_salida": 23,
-      "tokens_prompt": 3244
+      "tokens_prompt": 3427
     },
     {
       "id": "arch_eliminar_enfatico",
@@ -233,9 +255,11 @@
         "ruta_base": "proyectos",
         "nombre": "basura.log"
       },
-      "ms": 399.2,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 440.2,
       "tokens_salida": 23,
-      "tokens_prompt": 3248
+      "tokens_prompt": 3431
     },
     {
       "id": "arch_mover_completo",
@@ -255,9 +279,11 @@
         "nombre": "examen.pdf",
         "destino": "proyectos"
       },
-      "ms": 533.6,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 585.6,
       "tokens_salida": 32,
-      "tokens_prompt": 3245
+      "tokens_prompt": 3428
     },
     {
       "id": "arch_mover_sin_origen",
@@ -276,9 +302,11 @@
         "nombre": "resumen.pdf",
         "destino": "clases"
       },
-      "ms": 490.5,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 547.4,
       "tokens_salida": 29,
-      "tokens_prompt": 3245
+      "tokens_prompt": 3428
     },
     {
       "id": "arch_mover_a_subcarpeta",
@@ -298,9 +326,11 @@
         "nombre": "cv.pdf",
         "destino": "trabajo"
       },
-      "ms": 518.6,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 603.9,
       "tokens_salida": 31,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "arch_listar_con_ubicacion",
@@ -317,9 +347,11 @@
         "action": "listar",
         "ruta_base": "proyectos"
       },
-      "ms": 296.8,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 341.5,
       "tokens_salida": 16,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "arch_listar_sin_ubicacion",
@@ -335,9 +367,11 @@
       "obtenido": {
         "action": "listar"
       },
-      "ms": 264.7,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 298.8,
       "tokens_salida": 14,
-      "tokens_prompt": 3237
+      "tokens_prompt": 3420
     },
     {
       "id": "arch_listar_clases",
@@ -354,9 +388,11 @@
         "action": "listar",
         "ruta_base": "clases"
       },
-      "ms": 293.7,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 330.1,
       "tokens_salida": 16,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "arch_leer_con_ubicacion",
@@ -374,9 +410,11 @@
         "ruta_base": "proyectos",
         "nombre": "config.json"
       },
-      "ms": 402.7,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 453.7,
       "tokens_salida": 23,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "arch_leer_sin_ubicacion",
@@ -393,9 +431,11 @@
         "action": "leer",
         "nombre": "readme"
       },
-      "ms": 351.8,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 413.6,
       "tokens_salida": 20,
-      "tokens_prompt": 3238
+      "tokens_prompt": 3421
     },
     {
       "id": "app_spotify",
@@ -411,9 +451,11 @@
         "action": "abrir_aplicacion",
         "nombre": "spotify"
       },
-      "ms": 305.3,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 361.2,
       "tokens_salida": 17,
-      "tokens_prompt": 3237
+      "tokens_prompt": 3420
     },
     {
       "id": "app_discord",
@@ -429,9 +471,11 @@
         "action": "abrir_aplicacion",
         "nombre": "discord"
       },
-      "ms": 303.9,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 362.7,
       "tokens_salida": 17,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "app_navegador",
@@ -448,9 +492,11 @@
         "action": "abrir_aplicacion",
         "nombre": "navegador"
       },
-      "ms": 349.6,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 414.9,
       "tokens_salida": 20,
-      "tokens_prompt": 3238
+      "tokens_prompt": 3421
     },
     {
       "id": "ventana_chromium",
@@ -466,9 +512,11 @@
         "action": "enfocar_ventana",
         "nombre": "chromium"
       },
-      "ms": 347.1,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 412.7,
       "tokens_salida": 20,
-      "tokens_prompt": 3242
+      "tokens_prompt": 3425
     },
     {
       "id": "ventana_discord",
@@ -485,9 +533,11 @@
         "action": "enfocar_ventana",
         "nombre": "discord"
       },
-      "ms": 332.0,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 394.7,
       "tokens_salida": 19,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "rutina_programador",
@@ -503,9 +553,11 @@
         "action": "ejecutar_rutina",
         "nombre": "modo programador"
       },
-      "ms": 349.8,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 415.6,
       "tokens_salida": 20,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "vol_subir",
@@ -522,9 +574,11 @@
         "action": "volumen",
         "cantidad": "subir"
       },
-      "ms": 287.8,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 347.1,
       "tokens_salida": 16,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "vol_bajar",
@@ -541,9 +595,11 @@
         "action": "volumen",
         "cantidad": "bajar"
       },
-      "ms": 286.0,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 347.8,
       "tokens_salida": 16,
-      "tokens_prompt": 3242
+      "tokens_prompt": 3425
     },
     {
       "id": "vol_silenciar",
@@ -559,9 +615,11 @@
         "action": "volumen",
         "cantidad": "silenciar"
       },
-      "ms": 307.0,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 361.1,
       "tokens_salida": 17,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "brillo_bajar",
@@ -578,9 +636,11 @@
         "action": "brillo",
         "cantidad": "bajar"
       },
-      "ms": 276.9,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 325.4,
       "tokens_salida": 15,
-      "tokens_prompt": 3243
+      "tokens_prompt": 3426
     },
     {
       "id": "brillo_subir",
@@ -597,9 +657,11 @@
         "action": "brillo",
         "cantidad": "subir"
       },
-      "ms": 272.8,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 326.7,
       "tokens_salida": 15,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "brillo_implicito",
@@ -616,9 +678,11 @@
         "action": "brillo",
         "cantidad": "subir"
       },
-      "ms": 275.9,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 328.0,
       "tokens_salida": 15,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "captura_pantalla",
@@ -633,9 +697,11 @@
       "obtenido": {
         "action": "captura_pantalla"
       },
-      "ms": 214.7,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 260.0,
       "tokens_salida": 11,
-      "tokens_prompt": 3242
+      "tokens_prompt": 3425
     },
     {
       "id": "wifi_apagar",
@@ -652,9 +718,11 @@
         "action": "wifi",
         "cantidad": "bajar"
       },
-      "ms": 258.9,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 310.9,
       "tokens_salida": 14,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "wifi_desconectar",
@@ -671,9 +739,11 @@
         "action": "wifi",
         "cantidad": "bajar"
       },
-      "ms": 260.7,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 309.0,
       "tokens_salida": 14,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "wifi_prender",
@@ -689,9 +759,11 @@
         "action": "wifi",
         "cantidad": "subir"
       },
-      "ms": 262.1,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 314.0,
       "tokens_salida": 14,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "bluetooth_prender",
@@ -707,9 +779,11 @@
         "action": "bluetooth",
         "cantidad": "subir"
       },
-      "ms": 270.9,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 346.3,
       "tokens_salida": 15,
-      "tokens_prompt": 3238
+      "tokens_prompt": 3421
     },
     {
       "id": "bluetooth_apagar",
@@ -726,9 +800,11 @@
         "action": "bluetooth",
         "cantidad": "bajar"
       },
-      "ms": 277.0,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 353.4,
       "tokens_salida": 15,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "energia_suspender",
@@ -745,9 +821,11 @@
         "action": "energia",
         "cantidad": "suspender"
       },
-      "ms": 292.2,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 374.9,
       "tokens_salida": 16,
-      "tokens_prompt": 3242
+      "tokens_prompt": 3425
     },
     {
       "id": "energia_apagar",
@@ -765,9 +843,11 @@
         "action": "energia",
         "cantidad": "apagar"
       },
-      "ms": 279.0,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 353.1,
       "tokens_salida": 15,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "energia_reiniciar",
@@ -784,9 +864,11 @@
         "action": "energia",
         "cantidad": "reiniciar"
       },
-      "ms": 289.7,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 369.5,
       "tokens_salida": 16,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "musica_pausar",
@@ -802,9 +884,11 @@
         "action": "control_musica",
         "cantidad": "pausar"
       },
-      "ms": 323.0,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 412.8,
       "tokens_salida": 18,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "musica_pausar_sinonimo",
@@ -820,9 +904,11 @@
         "action": "control_musica",
         "cantidad": "pausar"
       },
-      "ms": 325.8,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 407.4,
       "tokens_salida": 18,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "musica_reproducir",
@@ -838,9 +924,11 @@
         "action": "control_musica",
         "cantidad": "reproducir"
       },
-      "ms": 341.3,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 431.0,
       "tokens_salida": 19,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "musica_siguiente",
@@ -856,9 +944,11 @@
         "action": "control_musica",
         "cantidad": "siguiente"
       },
-      "ms": 324.2,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 409.9,
       "tokens_salida": 18,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "musica_anterior",
@@ -874,9 +964,11 @@
         "action": "control_musica",
         "cantidad": "anterior"
       },
-      "ms": 308.7,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 392.4,
       "tokens_salida": 17,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "musica_apagar_confundible",
@@ -893,9 +985,11 @@
         "action": "control_musica",
         "cantidad": "pausar"
       },
-      "ms": 321.5,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 410.0,
       "tokens_salida": 18,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "tiempo_hora",
@@ -910,9 +1004,11 @@
       "obtenido": {
         "action": "hora"
       },
-      "ms": 158.8,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 200.8,
       "tokens_salida": 7,
-      "tokens_prompt": 3237
+      "tokens_prompt": 3420
     },
     {
       "id": "tiempo_temporizador",
@@ -929,9 +1025,11 @@
         "action": "temporizador",
         "cantidad": "10"
       },
-      "ms": 294.2,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 373.2,
       "tokens_salida": 16,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "tiempo_temporizador_motivo",
@@ -947,9 +1045,11 @@
         "action": "temporizador",
         "cantidad": "5"
       },
-      "ms": 284.8,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 354.8,
       "tokens_salida": 15,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "tiempo_alarma",
@@ -966,9 +1066,11 @@
         "action": "alarma",
         "cantidad": "7:30"
       },
-      "ms": 316.3,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 393.3,
       "tokens_salida": 17,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "tiempo_recordatorio_guardar",
@@ -985,9 +1087,11 @@
         "action": "recordatorio",
         "contenido": "llamar al dentista"
       },
-      "ms": 329.2,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 411.1,
       "tokens_salida": 18,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "tiempo_recordatorio_consultar",
@@ -1004,9 +1108,11 @@
       "obtenido": {
         "action": "recordatorio"
       },
-      "ms": 253.3,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 315.5,
       "tokens_salida": 13,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "tiempo_nota_guardar",
@@ -1023,9 +1129,11 @@
         "action": "nota",
         "contenido": "comprar leche"
       },
-      "ms": 302.9,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 373.5,
       "tokens_salida": 16,
-      "tokens_prompt": 3243
+      "tokens_prompt": 3426
     },
     {
       "id": "tiempo_nota_consultar",
@@ -1042,9 +1150,11 @@
       "obtenido": {
         "action": "nota"
       },
-      "ms": 239.5,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 296.2,
       "tokens_salida": 12,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "util_calculo_suma",
@@ -1060,9 +1170,11 @@
         "action": "calculo",
         "contenido": "340 + 128"
       },
-      "ms": 377.3,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 472.3,
       "tokens_salida": 21,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "util_calculo_mixto",
@@ -1078,9 +1190,11 @@
         "action": "calculo",
         "contenido": "10 * 5 - 2"
       },
-      "ms": 378.8,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 469.1,
       "tokens_salida": 21,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "util_calculo_division",
@@ -1096,9 +1210,11 @@
         "action": "calculo",
         "contenido": "144 / 12"
       },
-      "ms": 365.0,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 450.8,
       "tokens_salida": 20,
-      "tokens_prompt": 3247
+      "tokens_prompt": 3430
     },
     {
       "id": "util_conversion_temp",
@@ -1106,20 +1222,19 @@
       "etiquetas": [
         "utilidades"
       ],
-      "accion_ok": false,
-      "slots_ok": false,
-      "ok": false,
-      "diferencias": [
-        "action: esperaba 'conversion', dio 'calculo'",
-        "cantidad: esperaba '100 celsius a fahrenheit', dio ''"
-      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
       "obtenido": {
-        "action": "calculo",
-        "contenido": "100 * 9/5 + 32"
+        "action": "conversion",
+        "cantidad": "100 celsius a fahrenheit"
       },
-      "ms": 442.7,
-      "tokens_salida": 25,
-      "tokens_prompt": 3249
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 450.6,
+      "tokens_salida": 20,
+      "tokens_prompt": 3432
     },
     {
       "id": "util_conversion_dist",
@@ -1135,9 +1250,11 @@
         "action": "conversion",
         "cantidad": "5 kilometros a millas"
       },
-      "ms": 336.3,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 413.0,
       "tokens_salida": 18,
-      "tokens_prompt": 3244
+      "tokens_prompt": 3427
     },
     {
       "id": "util_traduccion",
@@ -1154,9 +1271,11 @@
         "destino": "inglés",
         "contenido": "hola"
       },
-      "ms": 441.2,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 548.3,
       "tokens_salida": 25,
-      "tokens_prompt": 3241
+      "tokens_prompt": 3424
     },
     {
       "id": "charla_saludo",
@@ -1171,9 +1290,11 @@
       "obtenido": {
         "action": "saludo"
       },
-      "ms": 170.9,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 209.2,
       "tokens_salida": 8,
-      "tokens_prompt": 3236
+      "tokens_prompt": 3419
     },
     {
       "id": "charla_saludo_dia",
@@ -1188,9 +1309,11 @@
       "obtenido": {
         "action": "saludo"
       },
-      "ms": 173.2,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 223.2,
       "tokens_salida": 8,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "charla_chiste",
@@ -1205,9 +1328,11 @@
       "obtenido": {
         "action": "chiste"
       },
-      "ms": 173.4,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 222.1,
       "tokens_salida": 8,
-      "tokens_prompt": 3239
+      "tokens_prompt": 3422
     },
     {
       "id": "charla_despedida",
@@ -1222,9 +1347,11 @@
       "obtenido": {
         "action": "despedida"
       },
-      "ms": 198.2,
+      "ruteada": true,
+      "router_ok": true,
+      "ms": 238.9,
       "tokens_salida": 9,
-      "tokens_prompt": 3238
+      "tokens_prompt": 3421
     },
     {
       "id": "fuera_alcance_clima",
@@ -1239,9 +1366,11 @@
       "obtenido": {
         "action": "ninguna"
       },
-      "ms": 184.9,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 220.9,
       "tokens_salida": 8,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
     },
     {
       "id": "fuera_alcance_general",
@@ -1256,9 +1385,73 @@
       "obtenido": {
         "action": "ninguna"
       },
-      "ms": 186.1,
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 222.4,
       "tokens_salida": 8,
-      "tokens_prompt": 3240
+      "tokens_prompt": 3423
+    },
+    {
+      "id": "buscar_descripcion",
+      "texto": "dónde dejé el resumen de sistemas operativos",
+      "etiquetas": [
+        "busqueda",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "buscar",
+        "contenido": "resumen de sistemas operativos"
+      },
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 507.0,
+      "tokens_salida": 23,
+      "tokens_prompt": 3429
+    },
+    {
+      "id": "buscar_explicito",
+      "texto": "buscame el archivo del presupuesto",
+      "etiquetas": [
+        "busqueda"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "buscar",
+        "contenido": "presupuesto"
+      },
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 449.6,
+      "tokens_salida": 20,
+      "tokens_prompt": 3424
+    },
+    {
+      "id": "buscar_vago",
+      "texto": "encontrame lo del contrato de alquiler",
+      "etiquetas": [
+        "busqueda",
+        "par_confundible"
+      ],
+      "accion_ok": true,
+      "slots_ok": true,
+      "ok": true,
+      "diferencias": [],
+      "obtenido": {
+        "action": "buscar",
+        "contenido": "contrato de alquiler"
+      },
+      "ruteada": false,
+      "router_ok": null,
+      "ms": 508.7,
+      "tokens_salida": 23,
+      "tokens_prompt": 3427
     }
   ]
 }

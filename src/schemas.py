@@ -5,6 +5,8 @@ class FileAction(BaseModel):
     action: Literal[
         # archivos
         "crear_carpeta", "crear_archivo", "mover", "eliminar", "listar", "leer",
+        # búsqueda por contenido y significado (solo lectura, ver src/indice.py)
+        "buscar",
         # apps, ventanas y rutinas
         "abrir_aplicacion", "enfocar_ventana", "ejecutar_rutina",
         # sistema
