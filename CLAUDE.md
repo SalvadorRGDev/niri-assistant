@@ -351,6 +351,11 @@ Una tarea no está terminada hasta que, **en este orden**:
   seguridad). Ahora son `.venv/bin/python`, §2 las invoca igual y suma los comandos
   de verificación; `eval/casos.jsonl`, `eval/test_seguridad.py` y el baseline pasaron
   a `ask` por ser los postes del arco. Verificado con `jq -e` y 23 casos del hook.
+- **2026-09-05 — En Piper el costo es cargar el modelo, no sintetizar.** Por
+  subproceso son ~826 ms por frase, casi independientes de su largo, porque el
+  `.onnx` de 63 MB se relee en cada llamada. Con `PiperVoice.load()` una sola vez al
+  arrancar (655 ms) la síntesis baja a **62 ms** de mediana, RTF 0.03x. Corolario:
+  la caché de respuestas fijas que preveía el plan no hace falta.
 - **2026-09-05 — Falsos positivos del wake word con el micrófono interno.** 14
   disparos en dos horas, con scores de 0.901 a **0.986**, y los 14 terminaron en
   transcripción vacía: subir `WAKE_WORD_THRESHOLD` no los frena porque varios son
@@ -360,6 +365,15 @@ Una tarea no está terminada hasta que, **en este orden**:
   `AUDIO_GAIN` no es la palanca: con 1.0 o 3.0 el resultado es el mismo. La causa
   es el modelo entrenado con otro micrófono; ninguna filtración de seguridad falló
   (Whisper descartó todo), lo que se paga es CPU y disco.
+- **2026-09-05 — Fase 2 (primera mitad): Piper local en proceso.** `piper-tts`
+  1.8.0 instalado (hay wheel `abi3`, sirve en 3.14) y voz `es_MX-claude-high`
+  (60 MB) en `models/piper/`. `src/tts.py` carga la voz en memoria al arrancar y
+  descubre sola tanto la voz (cualquier `.onnx` de la carpeta) como el binario
+  (al lado de `sys.executable`, porque el servicio no activa el venv).
+  Generación: 900 ms con edge-tts → **62 ms**. `test_pipeline.py` pasó a usar el
+  router y el dispatcher reales: antes mandaba todo al Executor y no verificaba
+  ninguna acción que no fuera de archivos. Verificado: suites 46/46 y 22/22,
+  tres órdenes end-to-end habladas y el servicio con Piper cargado.
 - **2026-09-05 — Fase 1: router determinista, hilos del STT y precalentado.**
   `src/router.py` resuelve por regex las órdenes de vocabulario cerrado (volumen,
   brillo, wifi, bluetooth, música, hora, captura, saludo, despedida, chiste) sin
