@@ -259,6 +259,31 @@ grabaciones reales del usuario como negativos de audio real. Validación en stre
 0.902 a 0.989 sin falsos positivos. El pipeline de entrenamiento **no está en el
 repositorio**: reentrenarlo requiere rearmarlo.
 
+**Medir el STT exige el conjunto completo y conocer el piso de ruido.** Whisper no es
+determinista: la misma configuración corrida dos veces sobre las mismas 54 grabaciones
+difiere en una. Cualquier comparación por debajo de ese piso no dice nada. Se probó
+`beam_size=1` sobre 8 grabaciones —parecía 14% más rápido y 8/8 idéntico— y con las 54
+dio 36/54 y encima más lento en total. Quedó en 5 con `cpu_threads=8`, que baja el
+total un 8% sin salirse del ruido. `eval/test_stt.py` fija el conjunto y compara por
+hashes para no guardar transcripciones.
+
+**Las similitudes del codificador se leen por orden, no por valor.** Con e5 todo cae
+cerca de 0.8: sobre las carpetas reales, el mejor resultado supera a la mediana por
++0.036 cuando el archivo existe y +0.033 cuando no. Ningún umbral separa "lo encontré"
+de "no está", así que la señal es el ranking más el dato binario del BM25 (si ninguna
+palabra dicha aparece en ningún documento, no hay nada). De ahí el campo `literal` de
+cada resultado.
+
+**En Piper el costo es cargar el modelo, no sintetizar.** Por subproceso son ~826 ms
+por frase y casi no dependen de su largo, porque el `.onnx` se relee en cada llamada.
+Cargándolo una vez en memoria, la síntesis baja a 62 ms con la voz mexicana y 241 ms
+con la argentina. Por eso `src/tts.py` usa la API en proceso y no el binario, y por eso
+no hace falta cachear las respuestas fijas.
+
+**Comparar modelos en Ollama exige liberar la VRAM primero.** El 1.5B medido con el 3B
+todavía cargado corrió 68% en CPU y dio 1272 ms; con la GPU libre, 194 ms. `ollama ps`
+lo muestra en la columna PROCESSOR: si no dice "100% GPU", la medición no vale.
+
 **El paquete `ollama` de Arch es solo-CPU.** No incluye ningún backend de GPU
 (`/usr/lib/ollama/` trae únicamente `libggml-cpu-*.so`): con la GPU presente y su
 driver funcionando, igual reportaba `library=cpu` y generaba a ~8 tokens/s. Se

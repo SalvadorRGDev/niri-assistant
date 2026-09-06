@@ -298,48 +298,33 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 ## Aprendizajes
 
-<!-- Hechos técnicos verificados. Formato: AAAA-MM-DD — hecho — porqué importa. -->
+<!-- Trampas del entorno que cambian cómo trabajar. Los hallazgos técnicos del
+     producto viven en README.md > Decisiones técnicas, no acá. -->
 
+- **2026-09-05 — Antes de medir una mejora, medir el piso de ruido y fijar el
+  conjunto.** El STT y el NLU no son deterministas, y `recordings/` crece solo
+  (hoy, sobre todo con falsos positivos). Una muestra chica dio dos conclusiones
+  falsas seguidas. Usar `eval/run.py` y `eval/test_stt.py`, que fijan el conjunto.
 - **2026-09-05 — En el NLU el costo está en la salida, y la ventana se llena en
-  silencio.** El prefill es casi gratis con la cache de prefijo caliente (3823 tokens
-  en 0.05 s) y caro en frío (1.75 s); cada token generado cuesta ~15 ms. Por eso los
-  ejemplos del prompt no llevan claves nulas. Si el prompt no entra en `num_ctx`,
-  Ollama lo trunca por el principio **sin ningún error visible**: `src/nlu.py` avisa
-  al arrancar si el margen baja del 25%.
-- **2026-09-05 — Antes de medir una mejora, medir el piso de ruido.** El STT no es
-  determinista: la MISMA configuración corrida dos veces da 53/54 transcripciones
-  iguales. Con 8 grabaciones `beam_size=1` parecía 14% más rápido y 8/8 idéntico; con
-  las 54 dio 36/54 y encima más lento. Set fijo (grabaciones anteriores a la prueba,
-  porque el servicio agrega nuevas) y cada config en su propio proceso: dos
-  `WhisperModel` en un intérprete se pelean los hilos.
-- **2026-09-05 — Las similitudes de e5 se leen por orden, no por valor.** Todo cae
-  cerca de 0.8: el mejor match supera a la mediana por +0.036 cuando el archivo existe
-  y +0.033 cuando no, así que ningún umbral separa "lo encontré" de "no está". Sirven
-  el ranking (recall@1 = 9/10) y la señal binaria del BM25.
-- **2026-09-05 — En Piper el costo es cargar el modelo, no sintetizar.** Por
-  subproceso son ~826 ms por frase, casi independientes de su largo. Con
-  `PiperVoice.load()` una sola vez (655 ms) la síntesis baja a 62 ms.
+  silencio.** El prefill cacheado es casi gratis (0.05 s) y cada token generado
+  cuesta ~15 ms. Si el prompt no entra en `num_ctx`, Ollama lo trunca por el
+  principio **sin ningún error visible**; `src/nlu.py` avisa si el margen baja del 25%.
+- **2026-09-05 — Comparar modelos exige liberar la VRAM.** Con otro modelo cargado,
+  Ollama corre el segundo en CPU y la medición miente. Verificar `ollama ps`.
 - **2026-09-05 — El micrófono no es fijo y el wake word está atado al que se entrenó.**
-  Sin el USB, PipeWire se queda sin fuentes y el `default` no abre (`PaErrorCode
-  -9999`); `src/audio.py` prueba candidatos y espera en vez de morir. Con el mic
-  interno (6 dB más caliente) hubo 14 falsos positivos en dos horas con scores de
-  hasta 0.986, así que subir el umbral no ayuda ni `AUDIO_GAIN` cambia nada. Ojo:
-  sondear dispositivos ALSA abriéndolos hace segfaultear a PortAudio, y un `start()`
-  fallido escribe ~10.000 líneas al fd 2 desde C — justo el `RateLimitBurst` de
-  journald, que entonces descarta todos los logs del servicio.
-- **2026-09-05 — Comparar modelos en Ollama exige descargar el otro primero.** El
-  1.5B medido con el 3B todavía en VRAM corrió **68% en CPU** y dio 1272 ms; con la
-  GPU libre da 194 ms. `ollama ps` muestra la columna PROCESSOR: si no dice
-  "100% GPU", la medición no vale. Vale para cualquier prueba de modelos en 4 GB.
+  Sin el USB, PipeWire se queda sin fuentes y el `default` no abre. Con el interno
+  hubo 14 falsos positivos en dos horas con scores de hasta 0.986: ni el umbral ni
+  `AUDIO_GAIN` lo arreglan. Sondear dispositivos ALSA abriéndolos hace segfaultear a
+  PortAudio, y un `start()` fallido escribe ~10.000 líneas al fd 2 desde C, que es el
+  `RateLimitBurst` de journald: sin silenciar ese descriptor, systemd descarta todos
+  los logs del servicio.
 - **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
-  Con Ollama apagado el NLU devuelve `action='ninguna'` y el asistente responde "no
-  entendí", que parece un problema de comprensión. Verificar `systemctl is-active
-  ollama` antes de diagnosticar el NLU; levantarlo requiere `sudo` (§3.1.1).
+  Con Ollama apagado el NLU devuelve `action='ninguna'` y parece un problema de
+  comprensión. Verificar `systemctl is-active ollama`; levantarlo requiere `sudo` (§3.1.1).
 - **2026-09-04 — No hay `npm`, `black` ni `pytest`**, y Python es **3.14** (sin wheels
   de `tflite-runtime` ni TensorFlow, de ahí `onnxruntime` para el wake word).
 - **2026-09-03 — Micrófono de acceso exclusivo, `AUDIO_GAIN` solo para el VAD y
-  `CPUQuota` bajo rompiendo el VAD:** los tres están en `README.md` > Decisiones
-  técnicas.
+  `CPUQuota` bajo rompiendo el VAD:** los tres están en `README.md`.
 
 ## Historial de Cambios Recientes
 
