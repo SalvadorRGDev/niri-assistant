@@ -80,7 +80,13 @@ STT_COMPUTE_TYPE = os.getenv("STT_COMPUTE_TYPE", "int8")
 # README.md: 1. pip install piper-tts  2. descargar una voz ES
 # .onnx a models/piper/) y por último a espeak-ng (offline, siempre).
 PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
-PIPER_VOICE_MODEL = Path(os.getenv("PIPER_VOICE_MODEL", str(MODELS_DIR / "piper" / "es_MX.onnx")))
+# Voz rioplatense (daniela), elegida por ser la más parecida a la voz de la nube
+# que usa el asistente por defecto. Cuesta más que la mexicana que estaba antes
+# —114 MB contra 60 en disco, 241 ms contra 60 por frase, 843 ms contra 533 al
+# cargar— y aun así es 4x más rápida que edge-tts, que ronda los 900 ms.
+# src/tts.py acepta cualquier .onnx de models/piper/ si este no está.
+PIPER_VOICE_MODEL = Path(os.getenv(
+    "PIPER_VOICE_MODEL", str(MODELS_DIR / "piper" / "es_AR-daniela-high.onnx")))
 ALLOW_CLOUD_TTS_FALLBACK = os.getenv("ALLOW_CLOUD_TTS_FALLBACK", "true").lower() in ("1", "true", "yes")
 
 # UX

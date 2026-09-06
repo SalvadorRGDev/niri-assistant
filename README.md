@@ -117,14 +117,19 @@ que el pipeline sea **100% local**:
 ```bash
 .venv/bin/python -m pip install piper-tts
 mkdir -p models/piper
-V=https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_MX/claude/high/es_MX-claude-high
-curl -L -o models/piper/es_MX.onnx      "$V.onnx"        # 60 MB
-curl -L -o models/piper/es_MX.onnx.json "$V.onnx.json"
+V=https://huggingface.co/rhasspy/piper-voices/resolve/main/es/es_AR/daniela/high/es_AR-daniela-high
+curl -L -o models/piper/es_AR-daniela-high.onnx      "$V.onnx"        # 114 MB
+curl -L -o models/piper/es_AR-daniela-high.onnx.json "$V.onnx.json"
 ```
+
+La voz es `daniela` (es_AR, mujer), elegida por parecerse a la de la nube. Hay
+alternativas más baratas en el mismo repositorio: `es_MX/claude/high` pesa 60 MB y
+sintetiza en 60 ms contra los 241 ms de esta. Las dos siguen siendo mucho más
+rápidas que edge-tts (~900 ms), así que la diferencia no se nota hablando.
 
 `src/tts.py` acepta **cualquier** `.onnx` que haya en `models/piper/`, así que la voz
 se puede bajar con su nombre original sin renombrarla. Se carga en memoria al arrancar
-(655 ms una vez) y a partir de ahí genera en **62 ms**: por subproceso serían ~826 ms,
+(843 ms una vez) y a partir de ahí genera en **241 ms**: por subproceso sería ~4x más,
 porque el modelo se relee en cada llamada.
 
 Después, `ALLOW_CLOUD_TTS_FALLBACK=false`. Sin Piper y sin internet, el sistema cae a
@@ -168,7 +173,7 @@ no son arbitrarios: salieron de mediciones sobre este hardware.
 | `STT_MIN_AVG_LOGPROB` | `-0.5` | Filtro anti-alucinación; defensa, no optimización |
 | `STT_COMPUTE_TYPE` | `int8` | |
 | `ALLOW_CLOUD_TTS_FALLBACK` | `true` | `false` fuerza pipeline 100% local |
-| `PIPER_VOICE_MODEL` | `models/piper/es_MX.onnx` | |
+| `PIPER_VOICE_MODEL` | `models/piper/es_AR-daniela-high.onnx` | Cualquier `.onnx` de esa carpeta sirve |
 
 ## Puesta en marcha
 
