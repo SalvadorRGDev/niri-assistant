@@ -98,8 +98,8 @@ def percentil(valores: list[float], p: float) -> float:
     return orden[bajo] + (orden[alto] - orden[bajo]) * (pos - bajo)
 
 
-def correr(casos: list[dict], verboso: bool) -> dict:
-    nlu = NLU()
+def correr(casos: list[dict], verboso: bool, modelo: str | None = None) -> dict:
+    nlu = NLU(modelo) if modelo else NLU()
 
     # Dos llamadas de calentamiento: la primera carga los pesos a VRAM, la
     # segunda deja caliente la cache de prefijo del system prompt. Sin esto, los
@@ -217,6 +217,8 @@ def main() -> int:
     parser.add_argument("--guardar-baseline", action="store_true",
                         help="además de guardar la corrida, fijarla como referencia")
     parser.add_argument("--verboso", action="store_true", help="listar también los casos que pasan")
+    parser.add_argument("--modelo", help="correr el banco contra otro modelo de Ollama "
+                                          "(p. ej. qwen2.5:1.5b-instruct) sin tocar producción")
     args = parser.parse_args()
 
     casos = cargar_casos(args.filtro)
@@ -226,7 +228,9 @@ def main() -> int:
 
     print(f"Banco de evaluación del NLU — {len(casos)} casos"
           + (f" (filtro: {args.filtro})" if args.filtro else ""))
-    informe = correr(casos, args.verboso)
+    if args.modelo:
+        print(f"{GRIS}modelo: {args.modelo} (no se toca la configuración de producción){FIN}")
+    informe = correr(casos, args.verboso, args.modelo)
 
     print(f"\n{'':2}acción correcta      {informe['accion_ok']}/{informe['total']}")
     print(f"{'':2}acción + slots       {informe['slots_ok']}/{informe['total']}")
@@ -261,6 +265,11 @@ def main() -> int:
     if informe["router_errores"]:
         print(f"\n{ROJO}El router contestó mal en {informe['router_errores']} casos: "
               f"corre antes que el NLU, así que un error suyo no lo corrige nadie.{FIN}")
+
+    if args.modelo:
+        print(f"\n{GRIS}Corrida exploratoria: no se compara contra el baseline ni se lo "
+              f"actualiza, porque es otro modelo.{FIN}")
+        return 0
 
     referencia_path = args.comparar or (BASELINE_PATH if BASELINE_PATH.exists() else None)
     if referencia_path and Path(referencia_path).exists():

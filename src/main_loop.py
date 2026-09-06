@@ -1,5 +1,6 @@
 import time
 import threading
+from collections import deque
 import wave
 import datetime
 import numpy as np
@@ -32,6 +33,19 @@ logger = get_logger("MainLoop")
 # árbol grande tarda segundos, y bloquear el bucle de audio significa perderse el
 # wake word.
 INTERVALO_INDICE_S = 600
+
+# Segundos de audio previos al disparo del wake word que se guardan cuando el
+# turno resulta ser un falso positivo.
+#
+# Existe porque el problema no se puede diagnosticar sin este audio: las
+# grabaciones de `recordings/` empiezan DESPUÉS del disparo, así que nunca
+# contienen el sonido que lo causó. Sin esos negativos reales no hay con qué
+# reentrenar el wake word, y reentrenarlo es la única salida verdadera: el
+# modelo se entrenó con voces sintéticas y negativos del micrófono USB, y con
+# el micrófono interno dispara con scores de hasta 0.986 sobre ruido ambiente,
+# así que ni el umbral ni la ganancia lo arreglan.
+PREROLL_SEGUNDOS = 2.0
+PREROLL_DIR = RECORDINGS_DIR / "falsos_positivos"
 
 VAD_CHUNK_SAMPLES = 512  # 32ms a 16kHz, tamaño fijo que exige Silero VAD
 
@@ -82,6 +96,33 @@ class MainLoop:
         self.running = False
         # Métricas del turno en curso (None mientras se espera el wake word).
         self.turno: Optional[TurnoMetricas] = None
+        # Audio anterior al wake word, para poder diagnosticar los falsos positivos.
+        self.preroll = deque(maxlen=int(PREROLL_SEGUNDOS * SAMPLE_RATE / 1280) + 1)
+        self.preroll_del_turno: Optional[np.ndarray] = None
+
+    def guardar_falso_positivo(self):
+        """
+        Guarda el audio previo a un disparo que no produjo ninguna orden.
+
+        Va a `recordings/falsos_positivos/` y no a `recordings/`, para no mezclar
+        negativos con las órdenes reales del usuario: el día que se reentrene el
+        wake word, esa separación es justo lo que hace usable el material.
+        """
+        if self.preroll_del_turno is None or len(self.preroll_del_turno) == 0:
+            return
+        try:
+            PREROLL_DIR.mkdir(parents=True, exist_ok=True)
+            sello = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            destino = PREROLL_DIR / f"preroll_{sello}.wav"
+            with wave.open(str(destino), "wb") as wf:
+                wf.setnchannels(CHANNELS)
+                wf.setsampwidth(2)
+                wf.setframerate(SAMPLE_RATE)
+                wf.writeframes(self.preroll_del_turno.tobytes())
+            logger.info(f"Falso positivo del wake word guardado en {destino.name} "
+                        f"({len(self.preroll_del_turno) / SAMPLE_RATE:.1f}s previos al disparo).")
+        except Exception as e:
+            logger.warning(f"No pude guardar el audio del falso positivo: {e}")
 
     def save_utterance(self, audio_data: np.ndarray):
         """Saves the recorded utterance to a WAV file."""
@@ -459,8 +500,11 @@ class MainLoop:
 
                         # In IDLE, read 80ms chunks (1280 samples) for wake word
                         chunk = self.audio.read_chunk(1280)
+                        self.preroll.append(chunk)
                         if self.ww.feed(chunk):
                             logger.info("Transitioning to LISTENING state")
+                            self.preroll_del_turno = np.concatenate(list(self.preroll))
+                            self.preroll.clear()
                             play_beep()
                             self.state = State.LISTENING
 
@@ -500,6 +544,7 @@ class MainLoop:
                                 # entendible: casi siempre es un falso positivo
                                 # del wake word. Se anota para medir la tasa.
                                 falso_positivo = True
+                                self.guardar_falso_positivo()
                                 logger.info("Discarding empty or noise-only transcription.")
 
                         # Una línea por turno en logs/metrics.jsonl. Los tokens
@@ -517,6 +562,7 @@ class MainLoop:
                             tokens_salida=tokens.get("output_tokens"),
                         )
                         self.turno = None
+                        self.preroll_del_turno = None
 
                         logger.info("Transitioning to IDLE state")
                         self.state = State.IDLE

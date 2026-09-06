@@ -327,6 +327,10 @@ Una tarea no está terminada hasta que, **en este orden**:
   sondear dispositivos ALSA abriéndolos hace segfaultear a PortAudio, y un `start()`
   fallido escribe ~10.000 líneas al fd 2 desde C — justo el `RateLimitBurst` de
   journald, que entonces descarta todos los logs del servicio.
+- **2026-09-05 — Comparar modelos en Ollama exige descargar el otro primero.** El
+  1.5B medido con el 3B todavía en VRAM corrió **68% en CPU** y dio 1272 ms; con la
+  GPU libre da 194 ms. `ollama ps` muestra la columna PROCESSOR: si no dice
+  "100% GPU", la medición no vale. Vale para cualquier prueba de modelos en 4 GB.
 - **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
   Con Ollama apagado el NLU devuelve `action='ninguna'` y el asistente responde "no
   entendí", que parece un problema de comprensión. Verificar `systemctl is-active
@@ -351,6 +355,18 @@ Una tarea no está terminada hasta que, **en este orden**:
   confirmación por voz para `energia`, auditoría de las acciones no-archivo).
   **69/69 acción+slots, p50 de 662 a ~320 ms.** El detalle de cada cambio está en los
   mensajes de commit; verificado con las tres suites, `test_pipeline.py` y el servicio.
+- **2026-09-05 — Fase 3: experimentos medidos, ninguno adoptado.** `eval/test_stt.py`
+  (banco de regresión del STT sobre 87 grabaciones, guarda **hashes y no
+  transcripciones**, con tolerancia del 5% por el piso de ruido) y `eval/run.py
+  --modelo` para comparar modelos sin tocar producción. Resultados: el **1.5B** da
+  65/69 contra 69/69, ahorra 969 MiB de VRAM y es 39% más rápido — se documenta como
+  opción, no se adopta, porque falla los dos casos de "fuera de alcance" inventando
+  una acción en vez de decir `ninguna`. La **decodificación especulativa** se descarta
+  con números: el techo son ~100 ms sobre el 68% de órdenes que no atrapa el router,
+  a cambio de migrar de Ollama a llama-server y meter un segundo modelo en 4 GB.
+  Además, `src/main_loop.py` guarda ahora los 2 s previos a cada falso positivo del
+  wake word en `recordings/falsos_positivos/`: sin ese audio no hay con qué
+  reentrenarlo, y las métricas dicen que 36 de 37 disparos no produjeron ninguna orden.
 - **Anterior a 2026-09-05:** fix de nombres reales de carpeta en `src/paths.py`,
   consolidación de la documentación en `README.md`, git con licencia MIT y harness v2
   con `.claude/settings.json`. Está en `git log` (§6.7).
