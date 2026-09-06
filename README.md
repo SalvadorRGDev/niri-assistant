@@ -305,6 +305,13 @@ cuando el equipo está bajo carga pero no estrangula el pipeline en tiempo real.
 ```bash
 PY=.venv/bin/python
 
+# Verificación: ninguna de estas toca el micrófono ni la red
+$PY eval/run.py                # 69 órdenes contra el baseline; sale 1 si hay regresiones
+$PY eval/test_seguridad.py     # 46 checks de los invariantes de seguridad
+$PY eval/test_audio.py         # 22 checks de la selección de dispositivo de entrada
+$PY eval/test_stt.py           # regresión del STT sobre las grabaciones reales
+$PY eval/resumen_metricas.py   # p50/p95 por etapa sobre el uso real
+
 # Pipeline completo por texto, sin hablarle al micrófono
 $PY test_pipeline.py "Crea una carpeta llamada pruebas_nlu"
 
@@ -315,12 +322,73 @@ $PY test_phase1.py
 $PY test_mic_vad.py
 ```
 
+### Diagnóstico del wake word
+
+**Síntoma:** el asistente se despierta solo y no entiende nada. Medido con el
+micrófono interno: **38 de 40 activaciones sin ninguna transcripción**, con puntajes
+de hasta 0.986 — más altos que muchos aciertos reales, así que subir
+`WAKE_WORD_THRESHOLD` no alcanza. `AUDIO_GAIN` tampoco: con 1.0 o 3.0, Silero
+clasifica ese ruido como voz igual. La causa es que `oye_niri.onnx` se entrenó con
+voces sintéticas y negativos del micrófono USB, y el interno capta 6 dB más fuerte.
+
+El procedimiento de abajo decide **con datos** entre las dos únicas salidas: ajustar
+dos valores, o reentrenar.
+
+```bash
+# 1. Los negativos se juntan solos: cada disparo que no produce una orden guarda
+#    los 2 s previos en recordings/falsos_positivos/. Cuanto más corra, mejor.
+
+# 2. Grabar los positivos (~3 min). Es lo único que hace falta de tu parte.
+systemctl --user stop niri.service
+.venv/bin/python eval/grabar_wakeword.py        # o --cantidad 40
+systemctl --user start niri.service
+
+# 3. Decidir.
+.venv/bin/python eval/analizar_wakeword.py
+```
+
+El análisis busca en una grilla de umbral × frames consecutivos si existe algún par
+que detecte **todos** los positivos sin dejar pasar **ninguno** de los negativos:
+
+- **"Hay separación limpia"** → imprime los dos valores para `src/config.py`
+  (`WAKE_WORD_THRESHOLD` y `WAKE_WORD_TRIGGER_LEVEL`) y ahí termina.
+- **"No hay ningún par que separe"** → queda demostrado que hay que reentrenar con
+  negativos de este micrófono, que son justo los que se están juntando. El pipeline
+  de entrenamiento **no está en el repo**: rearmarlo es una sesión completa.
+
+Con menos de ~25 positivos el resultado no es concluyente. Una muestra chica ya
+produjo una conclusión falsa en este proyecto (ver `beam_size` más arriba).
+
+**Pista registrada:** los negativos recolectados tienen picos de 0.944 a 0.997,
+mientras que grabaciones de puro ruido ambiente quedan en 0.15-0.40, y los disparos
+ocurren cada ~5 minutos. No es "cualquier ruido": hay algo específico y periódico del
+ambiente que el modelo confunde con "oye niri". Identificarlo es media respuesta.
+
 ## Estado actual y pendientes
 
-El pipeline está completo y funcionando end-to-end. Lo único que falta para que sea
-**100% local** es instalar Piper: hoy, con la configuración por defecto, la voz sale
-por `edge-tts` (nube) cuando hay internet. Es el único punto del sistema donde algo
-sale de la máquina, y lo único que se envía es el texto de la respuesta.
+El pipeline está completo y funcionando end-to-end, con 137 verificaciones
+automáticas cubriéndolo (69 casos de comprensión, 46 de seguridad, 22 de audio, más
+la regresión del STT).
+
+**Lo que está abierto, por orden de importancia:**
+
+1. **Falsos positivos del wake word sin el micrófono USB.** Es lo único que hoy
+   impide usar el asistente cuando el USB no está conectado. El procedimiento para
+   resolverlo está arriba, en *Diagnóstico del wake word*, y solo necesita que
+   grabes ~30 muestras.
+2. **`VAD_SILENCE_TIMEOUT_MS` en 800 ms.** Es el bloque más grande de cada turno y
+   es espera pura. Bajarlo a 600 son 200 ms fijos de mejora, a riesgo de cortar
+   frases con pausa natural; hay que probarlo con `test_mic_vad.py`.
+3. **`qwen2.5:1.5b` como alternativa.** Ahorra 969 MiB de VRAM y es 39% más rápido,
+   pero contesta 65/69 en vez de 69/69 y, sobre todo, inventa una acción en vez de
+   decir `ninguna` ante pedidos fuera de alcance. Está medido y documentado; el
+   cambio es de una línea si algún día la VRAM importa más.
+
+**Sobre la frontera de nube:** Piper está instalado y anda (62 ms con la voz mexicana,
+241 ms con la rioplatense), pero `edge-tts` sigue siendo la voz primaria mientras haya
+internet, por preferencia de voz. Poniendo `ALLOW_CLOUD_TTS_FALLBACK=false` el sistema
+queda **100% local** sin perder ninguna función. Lo único que sale de la máquina hoy es
+el texto de la respuesta hablada.
 
 ## Privacidad
 
