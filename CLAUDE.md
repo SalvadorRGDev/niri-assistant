@@ -307,6 +307,13 @@ Una tarea no está terminada hasta que, **en este orden**:
   p50 de 662 a 310 ms sin perder exactitud. Al crecer el prompt, ojo: si no entra en
   `num_ctx`, Ollama lo trunca por el principio **sin ningún error visible**. Hoy son
   3245 de 5120 tokens y `src/nlu.py` avisa al arrancar si el margen baja del 25%.
+- **2026-09-05 — Para medir el STT hacen falta las 54 grabaciones, no 8.** El piso
+  de ruido es alto: la MISMA configuración corrida dos veces da 53/54 transcripciones
+  iguales, así que cualquier comparación por debajo de eso no dice nada. Con 8
+  grabaciones, `beam_size=1` parecía 14% más rápido y 8/8 idéntico; con las 54 resultó
+  36/54 y encima más lento en total. Set fijo (`recordings/` anteriores a la fecha de
+  la prueba, porque el servicio agrega archivos nuevos) y cada configuración en su
+  propio proceso: dos `WhisperModel` en el mismo intérprete se pelean los hilos.
 - **2026-09-05 — El micrófono no es un dispositivo fijo y el `default` puede no
   existir.** Al desconectar el micrófono USB, PipeWire se quedó sin ninguna fuente
   de audio y el `default` del sistema dejó de abrir (`PaErrorCode -9999` / ALSA -2):
@@ -344,6 +351,17 @@ Una tarea no está terminada hasta que, **en este orden**:
   seguridad). Ahora son `.venv/bin/python`, §2 las invoca igual y suma los comandos
   de verificación; `eval/casos.jsonl`, `eval/test_seguridad.py` y el baseline pasaron
   a `ask` por ser los postes del arco. Verificado con `jq -e` y 23 casos del hook.
+- **2026-09-05 — Fase 1: router determinista, hilos del STT y precalentado.**
+  `src/router.py` resuelve por regex las órdenes de vocabulario cerrado (volumen,
+  brillo, wifi, bluetooth, música, hora, captura, saludo, despedida, chiste) sin
+  tocar la GPU; usa `fullmatch` y se abstiene ante la duda, y nunca toca acciones
+  de archivos ni `energia`. Validado contra los mismos 66 casos del banco:
+  **22/66 (33%) resueltas sin LLM, 0 errores**, con `eval/run.py` fallando si el
+  router contesta mal. `src/stt.py` pasó a `cpu_threads=8` (~8% menos de tiempo,
+  idéntico dentro del ruido) pero **no** a `beam_size=1` (ver Aprendizajes), y
+  `MainLoop` precalienta el NLU al arrancar para que la primera orden no pague los
+  ~5 s de carga en frío. Verificado: las tres suites, `test_pipeline.py` y el
+  servicio reiniciado (precalentado en 0.34 s, sin errores).
 - **2026-09-05 — Fase 0: banco de evaluación, métricas y las correcciones que
   encontró.** Nuevos: `eval/casos.jsonl` (66 órdenes con su `FileAction` esperado),
   `eval/run.py` (compara contra `eval/resultados/baseline.json`, código 1 si hay

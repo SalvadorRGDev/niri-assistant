@@ -32,6 +32,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 from src.nlu import NLU  # noqa: E402
+from src.router import route  # noqa: E402
 
 CASOS_PATH = BASE_DIR / "eval" / "casos.jsonl"
 RESULTADOS_DIR = BASE_DIR / "eval" / "resultados"
@@ -118,6 +119,18 @@ def correr(casos: list[dict], verboso: bool) -> dict:
         obtenido = accion.model_dump()
         accion_ok, slots_ok, diferencias = evaluar_caso(caso["esperado"], obtenido)
 
+        # El router se evalúa contra la MISMA verdad de referencia que el NLU:
+        # si contesta, tiene que contestar bien. Abstenerse no es un error
+        # (la orden simplemente sigue al modelo), pero equivocarse sí lo es,
+        # porque el router se ejecuta antes y nadie lo revisa después.
+        ruteada = route(caso["texto"])
+        router_ok = None
+        if ruteada is not None:
+            r_accion, r_slots, r_dif = evaluar_caso(caso["esperado"], ruteada.model_dump())
+            router_ok = r_accion and r_slots
+            if not router_ok:
+                diferencias.append("ROUTER: " + "; ".join(r_dif))
+
         resultados.append({
             "id": caso["id"],
             "texto": caso["texto"],
@@ -127,12 +140,14 @@ def correr(casos: list[dict], verboso: bool) -> dict:
             "ok": accion_ok and slots_ok,
             "diferencias": diferencias,
             "obtenido": {k: v for k, v in obtenido.items() if v not in (None, "")},
+            "ruteada": ruteada is not None,
+            "router_ok": router_ok,
             "ms": round(ms, 1),
             "tokens_salida": nlu.last_metrics.get("output_tokens"),
             "tokens_prompt": nlu.last_metrics.get("prompt_tokens"),
         })
 
-        if verboso or not (accion_ok and slots_ok):
+        if verboso or not (accion_ok and slots_ok) or router_ok is False:
             marca = f"{VERDE}OK  {FIN}" if accion_ok and slots_ok else (
                 f"{AMARILLO}SLOT{FIN}" if accion_ok else f"{ROJO}MAL {FIN}")
             print(f"  {marca} {caso['id']:34} {ms:6.0f} ms  {caso['texto']!r}")
@@ -140,6 +155,7 @@ def correr(casos: list[dict], verboso: bool) -> dict:
                 print(f"       {GRIS}{d}{FIN}")
 
     latencias = [r["ms"] for r in resultados]
+    ruteadas = [r for r in resultados if r["ruteada"]]
     salidas = [r["tokens_salida"] for r in resultados if r["tokens_salida"]]
     return {
         "fecha": datetime.datetime.now().isoformat(timespec="seconds"),
@@ -151,6 +167,8 @@ def correr(casos: list[dict], verboso: bool) -> dict:
         "latencia_p95_ms": round(percentil(latencias, 0.95), 1),
         "tokens_prompt": resultados[0]["tokens_prompt"] if resultados else None,
         "tokens_salida_mediana": round(statistics.median(salidas), 1) if salidas else None,
+        "router_cobertura": len(ruteadas),
+        "router_errores": sum(1 for r in ruteadas if r["router_ok"] is False),
         "arranque_frio_s": round(frio_s, 2),
         "arranque_frio_detalle": metricas_frio,
         "casos": resultados,
@@ -218,6 +236,12 @@ def main() -> int:
     print(f"{'':2}arranque en frío     {informe['arranque_frio_s']:.2f} s "
           f"(carga {informe['arranque_frio_detalle'].get('load_ms', 0)/1000:.2f} s)")
 
+    cobertura = informe["router_cobertura"]
+    errores = informe["router_errores"]
+    color = ROJO if errores else VERDE
+    print(f"{'':2}router determinista  {cobertura}/{informe['total']} órdenes resueltas sin LLM "
+          f"({cobertura / informe['total']:.0%}), {color}{errores} errores{FIN}")
+
     print(f"\n{'':2}por etiqueta:")
     for etiqueta, (ok, total) in resumen_por_etiqueta(informe).items():
         marca = "" if ok == total else f"  {ROJO}<-{FIN}"
@@ -234,9 +258,14 @@ def main() -> int:
         print(f"{GRIS}baseline actualizado: {BASELINE_PATH.relative_to(BASE_DIR)}{FIN}")
         return 0
 
+    if informe["router_errores"]:
+        print(f"\n{ROJO}El router contestó mal en {informe['router_errores']} casos: "
+              f"corre antes que el NLU, así que un error suyo no lo corrige nadie.{FIN}")
+
     referencia_path = args.comparar or (BASELINE_PATH if BASELINE_PATH.exists() else None)
     if referencia_path and Path(referencia_path).exists():
-        return comparar(informe, json.loads(Path(referencia_path).read_text(encoding="utf-8")))
+        salida = comparar(informe, json.loads(Path(referencia_path).read_text(encoding="utf-8")))
+        return salida or (1 if informe["router_errores"] else 0)
 
     print(f"\n{GRIS}Sin referencia previa. Fijá esta corrida con --guardar-baseline.{FIN}")
     return 0

@@ -13,6 +13,7 @@ from src.wake_word import WakeWordDetector
 from src.vad import VoiceActivityDetector
 from src.stt import SpeechToText
 from src.nlu import NLU
+from src.router import route
 from src.executor import Executor
 from src.tts import TextToSpeech
 from src.confirm import interpret_confirmation
@@ -133,6 +134,30 @@ class MainLoop:
                     return utterance_audio
                 logger.info("Utterance was too short, discarding.")
                 return None
+
+    def _precalentar_nlu(self):
+        """
+        Hace una consulta trivial al modelo para pagar por adelantado la carga
+        de pesos y el prefill del system prompt.
+
+        Sin esto la primera orden del día cuesta ~5 s (2.7 s de carga a VRAM más
+        1.7 s de prefill en frío) con el usuario esperando. Acá ese costo cae en
+        el arranque del servicio, donde no hay nadie escuchando.
+
+        No es fatal si falla: el asistente tiene que arrancar igual aunque
+        `ollama.service` esté apagado. Como NLU.parse() no propaga excepciones,
+        el éxito se detecta por last_metrics, que solo se llena si hubo respuesta.
+        """
+        inicio = time.perf_counter()
+        self.nlu.parse("hola")
+        if self.nlu.last_metrics:
+            logger.info(f"NLU precalentado en {time.perf_counter() - inicio:.2f}s "
+                        f"({self.nlu.last_metrics.get('prompt_tokens')} tokens de prompt).")
+        else:
+            logger.warning(
+                "No pude precalentar el NLU: la primera orden va a tardar unos "
+                "segundos de más. ¿Está corriendo `ollama.service`?"
+            )
 
     def _reabrir_audio(self):
         """
@@ -362,6 +387,9 @@ class MainLoop:
 
     def run(self):
         self.running = True
+        # Antes de abrir el micrófono: si no hay dispositivo, start() se queda
+        # esperando, y no tiene sentido llegar caliente a un asistente sordo.
+        self._precalentar_nlu()
         self.audio.start()
         logger.info("Assistant started. State: IDLE")
         last_timer_check = 0.0
@@ -389,6 +417,7 @@ class MainLoop:
                     elif self.state == State.LISTENING:
                         self.turno = TurnoMetricas()
                         accion_del_turno = None
+                        origen_intencion = None
 
                         with self._medir("vad"):
                             utterance_audio = self.capture_utterance(max_wait_seconds=3.0)
@@ -402,19 +431,30 @@ class MainLoop:
                             if text and any(c.isalpha() for c in text):
                                 logger.info(f"[USER SAYS]: {text}")
 
-                                with self._medir("nlu"):
-                                    action = self.nlu.parse(text)
+                                # El router resuelve las órdenes de vocabulario
+                                # cerrado sin tocar la GPU; si no reconoce la
+                                # orden entera devuelve None y sigue el camino
+                                # de siempre.
+                                with self._medir("router"):
+                                    action = route(text)
+                                origen_intencion = "router"
+                                if action is None:
+                                    origen_intencion = "nlu"
+                                    with self._medir("nlu"):
+                                        action = self.nlu.parse(text)
                                 accion_del_turno = action.action
                                 self._dispatch_action(action, text)
                             else:
                                 logger.info("Discarding empty or noise-only transcription.")
 
-                        # Una línea por turno en logs/metrics.jsonl. Los tokens solo
-                        # se anotan si hubo parseo: si no, last_metrics todavía tiene
-                        # los del turno anterior y estaría mintiendo.
-                        tokens = self.nlu.last_metrics if accion_del_turno else {}
+                        # Una línea por turno en logs/metrics.jsonl. Los tokens
+                        # solo se anotan si el NLU corrió de verdad: si contestó
+                        # el router, last_metrics todavía tiene los del turno
+                        # anterior y estaría mintiendo.
+                        tokens = self.nlu.last_metrics if origen_intencion == "nlu" else {}
                         self.turno.registrar(
                             accion=accion_del_turno,
+                            origen=origen_intencion,
                             audio_s=(round(len(utterance_audio) / SAMPLE_RATE, 2)
                                      if utterance_audio is not None else None),
                             tokens_prompt=tokens.get("prompt_tokens"),

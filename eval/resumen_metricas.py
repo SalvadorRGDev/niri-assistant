@@ -23,7 +23,7 @@ from src.metrics import METRICS_PATH  # noqa: E402
 
 # Orden real del pipeline, para que la tabla se lea como el turno sucede.
 ETAPAS = [("vad", "espera + VAD"), ("stt", "transcripción"),
-          ("nlu", "intención"), ("tts", "voz")]
+          ("router", "router"), ("nlu", "intención (LLM)"), ("tts", "voz")]
 
 
 def percentil(valores, p):
@@ -92,6 +92,12 @@ def main() -> int:
     salidas = [t["tokens_salida"] for t in turnos if t.get("tokens_salida")]
     if salidas:
         print(f"\n  tokens de salida del NLU: p50 {percentil(salidas, .50):.0f} · p95 {percentil(salidas, .95):.0f}")
+
+    resueltos = Counter(t.get("origen") for t in turnos if t.get("origen"))
+    if resueltos:
+        con_orden = sum(resueltos.values())
+        por_router = resueltos.get("router", 0)
+        print(f"\n  resueltos sin LLM: {por_router}/{con_orden} ({por_router / con_orden:.0%})")
 
     acciones = Counter(t.get("accion") for t in turnos if t.get("accion"))
     if acciones:

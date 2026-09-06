@@ -21,8 +21,15 @@ INITIAL_PROMPT = (
 class SpeechToText:
     def __init__(self, model_size=STT_MODEL_SIZE, compute_type=STT_COMPUTE_TYPE):
         logger.info(f"Loading Whisper model '{model_size}' ({compute_type}) on CPU...")
-        # device="cpu" is required if no GPU is available
-        self.model = WhisperModel(model_size, device="cpu", compute_type=compute_type)
+        # device="cpu" is required if no GPU is available.
+        # cpu_threads=8 y no el default: medido sobre 54 grabaciones reales
+        # (174.7 s de audio), el total baja de 26.3-27.7 s a 24.4 s (~8%) y la
+        # transcripción es idéntica en 53 de 54 — el mismo 53/54 que da la
+        # configuración contra SÍ MISMA en dos corridas, o sea que la diferencia
+        # es el no determinismo del propio Whisper, no los hilos. Con 16 no
+        # mejora: el trabajo deja de escalar antes de agotar los núcleos.
+        self.model = WhisperModel(model_size, device="cpu", compute_type=compute_type,
+                                   cpu_threads=8)
         logger.info("Whisper model loaded successfully.")
 
     def transcribe(self, audio_array: np.ndarray) -> str:
@@ -36,6 +43,14 @@ class SpeechToText:
         logger.info("Transcribing audio...")
         segments, info = self.model.transcribe(
             audio_array,
+            # beam_size=5, NO 1. Se probó bajarlo a greedy y hay que dejarlo
+            # documentado porque parecía una mejora obvia: sobre 8 grabaciones
+            # daba 8/8 idénticas y ~14% más rápido. Con el set completo de 54
+            # grabaciones el resultado se da vuelta — solo 36/54 idénticas, muy
+            # por debajo del piso de ruido de 53/54, y encima el tiempo TOTAL
+            # empeora (27.9 s contra 25.9 s). La muestra de 8 era demasiado
+            # chica. En un asistente que borra archivos, cambiar 1 de cada 3
+            # transcripciones no se compra con velocidad que además no aparece.
             beam_size=5,
             language="es",
             # Recorta el silencio antes de decodificar: además de acelerar, evita
