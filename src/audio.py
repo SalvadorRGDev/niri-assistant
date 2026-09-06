@@ -43,13 +43,17 @@ def _sin_ruido_de_alsa():
     excepción se guarda y se reporta afuera.
     """
     original = os.dup(2)
-    devnull = os.open(os.devnull, os.O_WRONLY)
     try:
-        os.dup2(devnull, 2)
-        yield
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 2)
+            yield
+        finally:
+            os.dup2(original, 2)
+            os.close(devnull)
     finally:
-        os.dup2(original, 2)
-        os.close(devnull)
+        # Anidado a propósito: si `os.open` falla, `original` ya existe y sin
+        # este finally quedaría abierto para siempre.
         os.close(original)
 
 

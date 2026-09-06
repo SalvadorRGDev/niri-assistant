@@ -34,6 +34,14 @@ logger = get_logger("MainLoop")
 # wake word.
 INTERVALO_INDICE_S = 600
 
+# Freno para errores que se repiten. Sobrevivir a una excepción está bien, pero
+# si la causa persiste el bucle giraría a toda velocidad escribiendo un
+# traceback por vuelta: eso es lo que hace que journald descarte los logs del
+# servicio entero (ver el incidente de PortAudio en README.md). La espera crece
+# con los errores seguidos y se reinicia en cuanto una vuelta sale bien.
+ESPERA_TRAS_ERROR_S = 1.0
+ESPERA_MAXIMA_TRAS_ERROR_S = 30.0
+
 # Segundos de audio previos al disparo del wake word que se guardan cuando el
 # turno resulta ser un falso positivo.
 #
@@ -485,6 +493,7 @@ class MainLoop:
         logger.info("Assistant started. State: IDLE")
         last_timer_check = 0.0
 
+        errores_seguidos = 0
         try:
             while self.running:
                 try:
@@ -570,6 +579,28 @@ class MainLoop:
                     # No es un error fatal: el dispositivo puede volver.
                     logger.warning(f"{e} Reabriendo la entrada de audio.")
                     self._reabrir_audio()
+                except Exception:
+                    # Cualquier otra falla de una etapa (STT, NLU, ejecutor, TTS,
+                    # búsqueda) mataba el proceso entero: systemd lo reiniciaba,
+                    # pero eso son ~10 s de recargar Whisper, Piper y el modelo,
+                    # y el asistente queda sordo mientras tanto. Un servicio que
+                    # corre 24/7 tiene que sobrevivir a un turno que salió mal.
+                    #
+                    # KeyboardInterrupt no cae acá: hereda de BaseException, así
+                    # que Ctrl+C sigue cortando como antes.
+                    errores_seguidos += 1
+                    espera = min(ESPERA_TRAS_ERROR_S * errores_seguidos,
+                                 ESPERA_MAXIMA_TRAS_ERROR_S)
+                    logger.exception(
+                        f"Error inesperado durante el turno ({errores_seguidos} seguidos); "
+                        f"vuelvo a IDLE y espero {espera:.0f}s."
+                    )
+                    self.turno = None
+                    self.preroll_del_turno = None
+                    self.state = State.IDLE
+                    time.sleep(espera)
+                else:
+                    errores_seguidos = 0
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received. Stopping...")
         finally:

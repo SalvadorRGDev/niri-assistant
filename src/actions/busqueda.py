@@ -7,11 +7,12 @@ sin abrir ni tocar nada: es una acción de solo lectura.
 El índice se carga perezosamente y se comparte entre llamadas: son 118 MB de
 modelo que no tiene sentido pagar si el usuario nunca busca.
 """
+import threading
 from pathlib import Path
 from typing import Optional
 
 from src.schemas import FileAction, ExecutionResult
-from src.indice import Indice
+from src.indice import Indice, IndiceOcupado
 from src.paths import speakable_path
 from src.logger import get_logger
 
@@ -20,14 +21,23 @@ logger = get_logger("Actions.Busqueda")
 MAX_RESULTADOS_HABLADOS = 2
 
 _indice: Optional[Indice] = None
+_lock_indice = threading.Lock()
 
 
 def obtener_indice() -> Indice:
-    """Índice compartido por proceso, creado en el primer uso."""
+    """
+    Índice compartido por proceso, creado en el primer uso.
+
+    Con lock porque hay dos hilos que lo piden: el indexador de fondo y el de
+    voz. Sin él, si entran a la vez en el primer uso se crean dos instancias, y
+    cada una carga su propia copia del modelo de embeddings: 236 MB de RAM en
+    vez de 118, más dos conexiones a la misma base.
+    """
     global _indice
-    if _indice is None:
-        _indice = Indice()
-    return _indice
+    with _lock_indice:
+        if _indice is None:
+            _indice = Indice()
+        return _indice
 
 
 def _donde(ruta: str, raiz: str) -> str:
@@ -54,6 +64,10 @@ def buscar(action: FileAction) -> ExecutionResult:
     try:
         indice = obtener_indice()
         resultados = indice.buscar(consulta, limite=MAX_RESULTADOS_HABLADOS + 1)
+    except IndiceOcupado:
+        return ExecutionResult(
+            text="Estoy terminando de revisar tus carpetas. Probá de nuevo en un momento."
+        )
     except Exception as e:
         logger.error(f"Error buscando '{consulta}': {e}")
         return ExecutionResult(text="Tuve un problema al buscar. Fijate el log.")

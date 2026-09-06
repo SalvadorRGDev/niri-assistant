@@ -42,6 +42,9 @@ class Embeddings:
         self._sesion = None
         self._tokenizer = None
         self._usa_token_type = False
+        # El indexador reintenta cada 10 minutos; sin esto, un modelo ausente
+        # llena el journal con la misma advertencia para siempre.
+        self._falta_avisada = False
 
     @property
     def disponible(self) -> bool:
@@ -52,10 +55,12 @@ class Embeddings:
         if self._sesion is not None:
             return True
         if not self.disponible:
-            logger.warning(
-                f"Falta el modelo de embeddings en {self.modelo_dir}. La búsqueda va a "
-                "funcionar solo por palabras (BM25), sin significado."
-            )
+            if not self._falta_avisada:
+                self._falta_avisada = True
+                logger.warning(
+                    f"Falta el modelo de embeddings en {self.modelo_dir}. La búsqueda va a "
+                    "funcionar solo por palabras (BM25), sin significado. Ver README.md."
+                )
             return False
         try:
             import onnxruntime as ort

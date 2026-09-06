@@ -33,6 +33,10 @@ from src.logger import get_logger
 
 logger = get_logger("Indice")
 
+
+class IndiceOcupado(RuntimeError):
+    """La base está tomada por una actualización y la búsqueda no puede esperar."""
+
 INDICE_PATH = Path(os.getenv("NIRI_INDICE_PATH", str(DATA_DIR / "indice.db")))
 
 # Extensiones cuyo contenido vale la pena leer. Del resto se indexa el nombre,
@@ -73,6 +77,11 @@ def _esta_excluido(carpeta: Path) -> bool:
 
 MAX_BYTES_LEIDOS = 4096      # fragmento por archivo: alcanza para saber de qué trata
 MAX_TAMANO_ARCHIVO = 5 * 1024 * 1024
+# Cuánto espera una búsqueda a que el indexador suelte la base. Una actualización
+# sin cambios tarda 4 ms, pero la primera sobre un árbol grande tarda segundos, y
+# el usuario hablándole al asistente no puede quedarse esperando en silencio.
+ESPERA_LOCK_S = 2.0
+
 K_CANDIDATOS = 30            # por cada rama antes de fusionar
 RRF_K = 60                   # constante estándar de Reciprocal Rank Fusion
 
@@ -313,8 +322,14 @@ class Indice:
         +0.036 cuando el archivo existe y +0.033 cuando no, o sea que ningún
         umbral los separa.
         """
-        with self._lock:
+        if not self._lock.acquire(timeout=ESPERA_LOCK_S):
+            # Preferimos decir la verdad a colgar el turno de voz.
+            logger.warning("Búsqueda cancelada: el índice está ocupado actualizándose.")
+            raise IndiceOcupado("El índice se está actualizando.")
+        try:
             return self._buscar(consulta, limite)
+        finally:
+            self._lock.release()
 
     def _buscar(self, consulta: str, limite: int) -> List[dict]:
         puntajes: dict[int, float] = {}

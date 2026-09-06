@@ -84,6 +84,7 @@ class TextToSpeech:
         self.piper_voz = None
         self.piper_bin = None
         voz = _buscar_voz_piper()
+        self.piper_voz_path = voz
         if voz is not None:
             try:
                 from piper import PiperVoice  # import perezoso: es opcional
@@ -92,7 +93,6 @@ class TextToSpeech:
             except Exception as e:
                 logger.warning(f"No pude cargar Piper en proceso ({e}); pruebo con el binario.")
                 self.piper_bin = _buscar_binario_piper()
-                self.piper_voz_path = voz
         self.has_piper = self.piper_voz is not None or self.piper_bin is not None
         if not self.has_piper:
             logger.warning(
