@@ -12,7 +12,7 @@ class FileAction(BaseModel):
         # sistema
         "volumen", "brillo", "captura_pantalla", "wifi", "bluetooth", "energia",
         # musica
-        "control_musica", "reproducir_cancion",
+        "control_musica",
         # tiempo
         "hora", "temporizador", "alarma", "recordatorio", "nota",
         # charla
@@ -58,6 +58,8 @@ class FileAction(BaseModel):
 class ExecutionResult(BaseModel):
     """Resultado de una ejecución del Executor."""
     text: str = Field(description="Respuesta hablada para el usuario (TTS).")
+    # Lo establece código de confianza, nunca FileAction ni la salida del LLM.
+    public_tts: bool = Field(default=False, description="Frase fija sin datos personales, apta para TTS en nube opt-in.")
     needs_confirmation: bool = Field(
         default=False,
         description="True si `text` es una pregunta de confirmación y la acción "

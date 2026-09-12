@@ -1,5 +1,6 @@
 import os
 import shutil
+import errno
 from pathlib import Path
 from typing import List, Optional
 
@@ -7,6 +8,7 @@ from src.schemas import FileAction, ExecutionResult
 from src.logger import get_logger
 from src.audit import log_action
 from src.paths import ALLOWED_ROOTS, DEFAULT_ROOT, speakable_path
+from src.safe_move import move_no_replace
 
 logger = get_logger("Executor")
 
@@ -22,7 +24,10 @@ LEER_MAX_CHARS = 800
 class Executor:
     def is_safe_path(self, target_path: Path) -> bool:
         """Check if the resolved path is within the allowed roots."""
-        resolved = target_path.resolve()
+        try:
+            resolved = target_path.resolve()
+        except (OSError, ValueError, RuntimeError):
+            return False
         for root in ALLOWED_ROOTS:
             try:
                 # relative_to will throw ValueError if resolved is not inside root
@@ -93,18 +98,24 @@ class Executor:
             logger.warning("Executor: Se requiere un nombre para la acción, pero no se proporcionó.")
             return ExecutionResult(text="Lo siento, necesito que me digas un nombre para el archivo o carpeta.")
 
+        # Validar también la base: 'listar' opera sobre ella, y un nombre
+        # absoluto no puede cambiar a escondidas la ubicación confirmada.
+        if not self.is_safe_path(base_dir) or (action.nombre and Path(action.nombre).is_absolute()):
+            return ExecutionResult(text="Por seguridad, no tengo permitido acceder a esa ruta.")
         target_path = base_dir / action.nombre if action.nombre else base_dir
 
         if not self.is_safe_path(target_path):
             logger.error(f"Security Alert: Attempt to access path outside allowed roots: {target_path}")
             return ExecutionResult(text="Por seguridad, no tengo permitido acceder a esa ruta.")
 
+        # Confirmar no concede permiso para tocar una raíz. Se comprueba en
+        # CADA ejecución, también después del diálogo (la ruta pudo cambiar).
+        if action.action in CONFIRMATION_REQUIRED and self.is_protected_root(target_path):
+            logger.error(f"Security Alert: Attempt to {action.action} a protected root: {target_path}")
+            return ExecutionResult(text="Por seguridad, no puedo tocar esa carpeta raíz.")
+
         # --- Confirmación obligatoria para acciones destructivas/irreversibles ---
         if action.action in CONFIRMATION_REQUIRED and not confirmed:
-            if self.is_protected_root(target_path):
-                logger.error(f"Security Alert: Attempt to {action.action} a protected root: {target_path}")
-                return ExecutionResult(text="Por seguridad, no puedo tocar esa carpeta raíz.")
-
             if action.action == "mover":
                 dest_path = destino_dir if destino_dir else (base_dir / action.destino if action.destino else None)
                 if dest_path is None:
@@ -136,11 +147,15 @@ class Executor:
         elif action.action == "crear_archivo":
             try:
                 target_path.parent.mkdir(parents=True, exist_ok=True)
-                with open(target_path, 'w') as f:
+                # Creación exclusiva y atómica: comprobar exists() y después
+                # abrir con 'w' aún permitiría sobrescribir en una carrera.
+                with open(target_path, 'x', encoding='utf-8') as f:
                     if action.contenido:
                         f.write(action.contenido)
                 logger.info(f"Éxito: Archivo creado en {target_path}")
                 return ExecutionResult(text=f"Archivo {action.nombre} creado en {speakable_path(base_dir)}.")
+            except FileExistsError:
+                return ExecutionResult(text=f"Ya existe algo llamado {action.nombre}; no lo sobrescribo. Usá otro nombre.")
             except Exception as e:
                 logger.error(f"Error creando archivo: {e}")
                 return ExecutionResult(text="No pude crear el archivo debido a un error.")
@@ -178,11 +193,18 @@ class Executor:
                 # renombre X a Y cuando Y no exista de antemano.
                 dest_path.mkdir(parents=True, exist_ok=True)
                 final_path = dest_path / Path(action.nombre).name
-                if final_path.exists():
+                if final_path.exists() or final_path.is_symlink():
                     return ExecutionResult(text=f"Ya existe algo llamado {action.nombre} en {speakable_path(dest_path)}, no lo muevo para no sobrescribirlo.")
-                shutil.move(str(target_path), str(final_path))
+                move_no_replace(target_path, final_path)
                 logger.warning(f"MOVIDO (confirmado por voz): {target_path} -> {final_path}")
                 return ExecutionResult(text=f"Moví {action.nombre} a {speakable_path(dest_path)} correctamente.")
+            except FileExistsError:
+                return ExecutionResult(text=f"Ya existe algo llamado {action.nombre} en el destino; no lo sobrescribo.")
+            except OSError as e:
+                if e.errno in {errno.EXDEV, errno.ENOSYS, errno.EOPNOTSUPP}:
+                    return ExecutionResult(text="No puedo mover entre esos destinos sin garantizar que no se sobrescriba nada. Operación cancelada.")
+                logger.error(f"Error moviendo: {e}")
+                return ExecutionResult(text="Hubo un error al intentar mover el archivo.")
             except Exception as e:
                 logger.error(f"Error moviendo: {e}")
                 return ExecutionResult(text="Hubo un error al intentar mover el archivo.")

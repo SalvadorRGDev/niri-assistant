@@ -16,6 +16,9 @@ _NO_WORDS = {
     "no", "cancela", "cancelar", "cancelado", "negativo",
     "detente", "para", "aborta", "abortar", "nel", "nope",
 }
+_YES_PHRASES = _YES_WORDS | {
+    "si por favor", "si confirmo", "si adelante", "si hazlo", "si dale",
+}
 
 
 def _normalize(text: str) -> str:
@@ -38,9 +41,12 @@ def interpret_confirmation(text: Optional[str]) -> Optional[bool]:
     """
     if not text:
         return None
-    words = set(_normalize(text).split())
+    normalized = " ".join(_normalize(text).split())
+    words = set(normalized.split())
     if words & _NO_WORDS:
         return False
-    if words & _YES_WORDS:
+    # Un 'sí' dentro de una condición ('sí, pero esperá') no autoriza actuar.
+    # Aceptar frases enteras mantiene la confirmación cerrada y fail-safe.
+    if normalized in _YES_PHRASES:
         return True
     return None

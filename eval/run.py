@@ -17,7 +17,8 @@ Uso:
     .venv/bin/python eval/run.py --comparar eval/resultados/2026-09-05_1200.json
     .venv/bin/python eval/run.py --filtro par_confundible
 
-Código de salida: 1 si hay regresiones contra la referencia, 0 si no.
+Código de salida: 1 si hay regresiones, 2 si la evaluación no pudo completarse.
+--solo-router evalúa las mismas órdenes sin necesitar Ollama.
 """
 import argparse
 import datetime
@@ -27,6 +28,8 @@ import sys
 import time
 import unicodedata
 from pathlib import Path
+
+from ollama import Client
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
@@ -44,6 +47,23 @@ BASELINE_PATH = RESULTADOS_DIR / "baseline.json"
 CAMPOS_SLOT = ("ruta_base", "nombre", "destino", "contenido", "cantidad")
 
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m"
+
+
+class EvaluacionNoDisponible(RuntimeError):
+    """Un fallo del backend no es una respuesta válida del modelo."""
+
+
+def parse_verificado(nlu: NLU, texto: str):
+    accion = nlu.parse(texto)
+    # Producción devuelve 'ninguna' y borra las métricas ante cualquier error.
+    # Contarlo como un acierto en los negativos produciría un falso éxito.
+    if not nlu.last_metrics:
+        raise EvaluacionNoDisponible(
+            "Ollama no respondió con una intención válida. Verificá que el servidor "
+            f"local y el modelo {nlu.model_name!r} estén disponibles. "
+            "La corrida no se guarda ni modifica el baseline."
+        )
+    return accion
 
 
 def normalizar(valor) -> str:
@@ -100,21 +120,23 @@ def percentil(valores: list[float], p: float) -> float:
 
 def correr(casos: list[dict], verboso: bool, modelo: str | None = None) -> dict:
     nlu = NLU(modelo) if modelo else NLU()
+    # El banco debe fallar con diagnóstico si el servidor deja de responder.
+    nlu.client = Client(timeout=120.0)
 
     # Dos llamadas de calentamiento: la primera carga los pesos a VRAM, la
     # segunda deja caliente la cache de prefijo del system prompt. Sin esto, los
     # dos primeros casos del banco cargarían con varios segundos que no son
     # suyos y ensuciarían la mediana.
     t0 = time.perf_counter()
-    nlu.parse("hola")
+    parse_verificado(nlu, "hola")
     frio_s = time.perf_counter() - t0
     metricas_frio = dict(nlu.last_metrics)
-    nlu.parse("hola")
+    parse_verificado(nlu, "hola")
 
     resultados = []
     for caso in casos:
         t0 = time.perf_counter()
-        accion = nlu.parse(caso["texto"])
+        accion = parse_verificado(nlu, caso["texto"])
         ms = (time.perf_counter() - t0) * 1000
         obtenido = accion.model_dump()
         accion_ok, slots_ok, diferencias = evaluar_caso(caso["esperado"], obtenido)
@@ -219,24 +241,54 @@ def main() -> int:
     parser.add_argument("--verboso", action="store_true", help="listar también los casos que pasan")
     parser.add_argument("--modelo", help="correr el banco contra otro modelo de Ollama "
                                           "(p. ej. qwen2.5:1.5b-instruct) sin tocar producción")
+    parser.add_argument("--solo-router", action="store_true",
+                        help="evaluar solo el router determinista, sin Ollama ni red")
     args = parser.parse_args()
+
+    if args.guardar_baseline and (args.filtro or args.modelo or args.solo_router):
+        parser.error("el baseline requiere el banco completo y el modelo de producción")
+    if args.comparar and not args.comparar.is_file():
+        print(f"No existe la referencia solicitada: {args.comparar}", file=sys.stderr)
+        return 2
 
     casos = cargar_casos(args.filtro)
     if not casos:
         print("No hay casos que correr (¿filtro sin coincidencias?)", file=sys.stderr)
         return 2
 
+    if args.solo_router:
+        cobertura, errores = 0, 0
+        for caso in casos:
+            accion = route(caso["texto"])
+            if accion is None:
+                continue
+            cobertura += 1
+            accion_ok, slots_ok, diferencias = evaluar_caso(
+                caso["esperado"], accion.model_dump())
+            if not (accion_ok and slots_ok):
+                errores += 1
+                print(f"  MAL {caso['id']}: {'; '.join(diferencias)}")
+        print(f"Router determinista: {cobertura}/{len(casos)} órdenes resueltas, "
+              f"{errores} errores. NLU no evaluado.")
+        return 1 if errores else 0
+
     print(f"Banco de evaluación del NLU — {len(casos)} casos"
           + (f" (filtro: {args.filtro})" if args.filtro else ""))
     if args.modelo:
         print(f"{GRIS}modelo: {args.modelo} (no se toca la configuración de producción){FIN}")
-    informe = correr(casos, args.verboso, args.modelo)
+    try:
+        informe = correr(casos, args.verboso, args.modelo)
+    except EvaluacionNoDisponible as exc:
+        print(f"Evaluación incompleta: {exc}", file=sys.stderr)
+        return 2
 
     print(f"\n{'':2}acción correcta      {informe['accion_ok']}/{informe['total']}")
     print(f"{'':2}acción + slots       {informe['slots_ok']}/{informe['total']}")
     print(f"{'':2}latencia p50 / p95   {informe['latencia_p50_ms']:.0f} / {informe['latencia_p95_ms']:.0f} ms")
     print(f"{'':2}tokens prompt        {informe['tokens_prompt']}")
-    print(f"{'':2}tokens salida        {informe['tokens_salida_mediana']:.0f} (mediana)")
+    tokens_salida = informe['tokens_salida_mediana']
+    tokens_texto = f"{tokens_salida:.0f} (mediana)" if tokens_salida is not None else "no reportados"
+    print(f"{'':2}tokens salida        {tokens_texto}")
     print(f"{'':2}arranque en frío     {informe['arranque_frio_s']:.2f} s "
           f"(carga {informe['arranque_frio_detalle'].get('load_ms', 0)/1000:.2f} s)")
 
@@ -258,9 +310,12 @@ def main() -> int:
     print(f"\n{GRIS}resultados: {destino.relative_to(BASE_DIR)}{FIN}")
 
     if args.guardar_baseline:
+        if informe["router_errores"]:
+            print("No se fija un baseline con errores del router.", file=sys.stderr)
+            return 1
         BASELINE_PATH.write_text(json.dumps(informe, ensure_ascii=False, indent=2), encoding="utf-8")
         print(f"{GRIS}baseline actualizado: {BASELINE_PATH.relative_to(BASE_DIR)}{FIN}")
-        return 0
+        return 1 if informe["router_errores"] else 0
 
     if informe["router_errores"]:
         print(f"\n{ROJO}El router contestó mal en {informe['router_errores']} casos: "
@@ -269,7 +324,7 @@ def main() -> int:
     if args.modelo:
         print(f"\n{GRIS}Corrida exploratoria: no se compara contra el baseline ni se lo "
               f"actualiza, porque es otro modelo.{FIN}")
-        return 0
+        return 1 if informe["router_errores"] else 0
 
     referencia_path = args.comparar or (BASELINE_PATH if BASELINE_PATH.exists() else None)
     if referencia_path and Path(referencia_path).exists():
@@ -277,7 +332,7 @@ def main() -> int:
         return salida or (1 if informe["router_errores"] else 0)
 
     print(f"\n{GRIS}Sin referencia previa. Fijá esta corrida con --guardar-baseline.{FIN}")
-    return 0
+    return 1 if informe["router_errores"] else 0
 
 
 if __name__ == "__main__":

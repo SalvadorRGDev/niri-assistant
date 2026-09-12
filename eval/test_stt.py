@@ -23,21 +23,20 @@ Uso:
     .venv/bin/python eval/test_stt.py                    # compara contra el baseline
 """
 import argparse
-import glob
 import hashlib
 import json
+import os
 import statistics
 import sys
 import time
 import wave
 from pathlib import Path
+from unittest.mock import patch
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
 import numpy as np  # noqa: E402
-
-from src.stt import SpeechToText  # noqa: E402
 
 BASELINE = BASE_DIR / "eval" / "resultados" / "audio_baseline.json"
 RECORDINGS = BASE_DIR / "recordings"
@@ -51,19 +50,34 @@ VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[32m", "\033[31m", "\033[33m", "\033[90m
 
 def cargar_audio(ruta: Path) -> np.ndarray:
     with wave.open(str(ruta)) as w:
+        if (w.getnchannels(), w.getsampwidth(), w.getframerate()) != (1, 2, 16000):
+            raise ValueError("el banco requiere WAV mono PCM16 a 16 kHz")
         crudo = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
     return crudo.astype(np.float32) / 32768.0
 
 
 def transcribir(archivos: list[Path]) -> tuple[dict, list[float]]:
     """Devuelve {nombre: hash del texto} y los tiempos. Nunca retorna el texto."""
-    stt = SpeechToText()
+    # Se fija antes de importar Hugging Face: sus constantes se leen al importar.
+    # local_files_only también protege si otra importación ya ocurrió antes.
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    from faster_whisper.utils import download_model
+    from src import stt as stt_mod
+    from src.config import STT_MODEL_SIZE
+
+    modelo = Path(STT_MODEL_SIZE)
+    ruta_modelo = str(modelo) if modelo.is_dir() else download_model(
+        STT_MODEL_SIZE, local_files_only=True)
     hashes, tiempos = {}, []
-    for ruta in archivos:
-        inicio = time.perf_counter()
-        texto = stt.transcribe(cargar_audio(ruta))
-        tiempos.append(time.perf_counter() - inicio)
-        hashes[ruta.name] = hashlib.sha256(texto.strip().lower().encode()).hexdigest()[:16]
+    # El logger de producción imprime tanto resultados como descartes de baja
+    # confianza. Desactivarlo cubre ambos caminos sin alterar src/stt.py.
+    with patch.object(stt_mod.logger, "disabled", True):
+        stt = stt_mod.SpeechToText(model_size=ruta_modelo)
+        for ruta in archivos:
+            inicio = time.perf_counter()
+            texto = stt.transcribe(cargar_audio(ruta))
+            tiempos.append(time.perf_counter() - inicio)
+            hashes[ruta.name] = hashlib.sha256(texto.strip().lower().encode()).hexdigest()[:16]
     return hashes, tiempos
 
 
@@ -75,12 +89,7 @@ def duracion_total(archivos: list[Path]) -> float:
     return total
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Regresión del STT sobre grabaciones reales")
-    parser.add_argument("--crear-baseline", action="store_true",
-                        help="fija el conjunto actual de grabaciones y sus hashes")
-    args = parser.parse_args()
-
+def ejecutar(args) -> int:
     if args.crear_baseline:
         archivos = sorted(RECORDINGS.glob("*.wav"))
         if not archivos:
@@ -103,22 +112,22 @@ def main() -> int:
         return 0
 
     if not BASELINE.exists():
-        print("No hay baseline todavía. Crealo con --crear-baseline.")
-        return 0
+        print("Evaluación omitida: no hay baseline. Crealo con --crear-baseline.", file=sys.stderr)
+        return 2
 
     referencia = json.loads(BASELINE.read_text(encoding="utf-8"))
+    if not referencia.get("hashes"):
+        print("Evaluación omitida: el baseline no contiene grabaciones.", file=sys.stderr)
+        return 2
     archivos = [RECORDINGS / n for n in referencia["hashes"]]
     faltantes = [a.name for a in archivos if not a.exists()]
-    archivos = [a for a in archivos if a.exists()]
-    if not archivos:
-        print("Ninguna grabación del baseline sigue en disco.", file=sys.stderr)
+    if faltantes:
+        print(f"Evaluación incompleta: faltan {len(faltantes)} grabaciones del baseline. "
+              "No se compara contra un subconjunto distinto.", file=sys.stderr)
         return 2
 
     print(f"Regresión del STT — {len(archivos)} grabaciones "
           f"({referencia['audio_s']}s de audio)")
-    if faltantes:
-        print(f"  {AMARILLO}{len(faltantes)} grabaciones del baseline ya no están{FIN}")
-
     hashes, tiempos = transcribir(archivos)
     distintas = [n for n, h in hashes.items() if referencia["hashes"].get(n) != h]
     mediana = statistics.median(tiempos) * 1000
@@ -139,6 +148,23 @@ def main() -> int:
 
     print(f"\n  {VERDE}sin regresión{FIN} ({len(distintas)} diferencias, dentro del ruido)")
     return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Regresión del STT sobre grabaciones reales; "
+                                     "usa el modelo en caché, sin descargas ni transcripciones en logs")
+    parser.add_argument("--crear-baseline", action="store_true",
+                        help="fija el conjunto actual de grabaciones y sus hashes")
+    args = parser.parse_args()
+    try:
+        return ejecutar(args)
+    except Exception as exc:
+        # Los errores del motor podrían incluir fragmentos del audio transcrito.
+        # El tipo basta para distinguir caché ausente, WAV inválido o fallo del motor.
+        print(f"Evaluación incompleta ({type(exc).__name__}). Verificá el baseline, "
+              "los WAV mono PCM16 a 16 kHz y el modelo Whisper instalado en la caché local. "
+              "No se descargan modelos ni se imprime contenido de voz.", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

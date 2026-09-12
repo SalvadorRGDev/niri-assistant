@@ -10,19 +10,50 @@ systemd entró en un bucle de reinicio que recargaba Whisper cada 12 segundos. E
 asistente tiene que elegir el dispositivo que haya en cada arranque, y esperar
 sin morir cuando no hay ninguno.
 
-Uso:  .venv/bin/python eval/test_audio.py     (código de salida 1 si algo falla)
+Uso:  .venv/bin/python eval/test_audio.py
+      .venv/bin/python eval/test_audio.py --portaudio
+
+La suite predeterminada no inicializa PortAudio. --portaudio agrega un sondeo
+real de un dispositivo inexistente, con timeout; requiere acceso al servidor
+de sonido. Salidas: 0 aprobado, 1 fallo, 2 sondeo no disponible.
 """
+import argparse
+import importlib.util
 import os
 import queue
 import subprocess
 import sys
 import time
+import wave
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import patch
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BASE_DIR))
 
-from src import audio as audio_mod  # noqa: E402
+import numpy as np  # noqa: E402
+from scipy.signal import lfilter, resample_poly  # noqa: E402
+
+# sounddevice inicializa PortAudio al importarse y puede bloquearse en un
+# sandbox sin acceso a PipeWire/PulseAudio. Los tests del callback y selección
+# deben poder correr allí; solo el sondeo opcional importa el backend real.
+def _dispositivo_invalido(*args, **kwargs):
+    raise ValueError("dispositivo inexistente en el doble de PortAudio")
+
+
+_sd_doble = SimpleNamespace(
+    query_devices=lambda *a, **k: DISPOSITIVOS_FALSOS[a[0]] if a else DISPOSITIVOS_FALSOS,
+    check_input_settings=_dispositivo_invalido,
+    InputStream=_dispositivo_invalido,
+)
+with patch.dict(sys.modules, {"sounddevice": _sd_doble}):
+    # Cargar con otro nombre evita dejar un src.audio con backend falso en el
+    # proceso si un runner importa varias suites juntas.
+    _spec_audio = importlib.util.spec_from_file_location("audio_en_evaluacion", BASE_DIR / "src" / "audio.py")
+    audio_mod = importlib.util.module_from_spec(_spec_audio)
+    _spec_audio.loader.exec_module(audio_mod)
+from src.config import CAPTURE_SAMPLE_RATE, RECORDINGS_DIR, SAMPLE_RATE  # noqa: E402
 
 VERDE, ROJO, FIN = "\033[32m", "\033[31m", "\033[0m"
 _fallos, _corridas = [], 0
@@ -185,16 +216,30 @@ def probar_silencio_de_alsa():
               b"no tiene que aparecer" not in salida, f"salida={salida!r}")
     verificar("el fd 2 queda restaurado al salir", b"esto si" in salida, f"salida={salida!r}")
 
-    # Abrir un dispositivo inexistente es el camino que imprimía ~10.000 líneas.
+    verificar("un dispositivo inválido se rechaza sin abrir un stream",
+              audio_mod.AudioStream()._abrir(99999) is False)
+
+
+def probar_portaudio() -> bool:
+    """Sondeo independiente; nunca intenta abrir un micrófono existente."""
+    print("\nSondeo opcional del backend PortAudio real", flush=True)
     guion = (
         "import sys; sys.path.insert(0, %r)\n"
         "from src.audio import AudioStream\n"
-        "AudioStream()._abrir(99999)\n"
+        "assert AudioStream()._abrir(99999) is False\n"
+        "print('PORTAUDIO_PROBADO')\n"
     ) % str(BASE_DIR)
-    proceso = subprocess.run([sys.executable, "-c", guion], capture_output=True, timeout=60)
+    try:
+        proceso = subprocess.run([sys.executable, "-c", guion], capture_output=True, timeout=10)
+    except subprocess.TimeoutExpired:
+        print("  Sondeo incompleto: PortAudio no respondió en 10 s. "
+              "Ejecutá --portaudio con acceso al servidor de sonido.", file=sys.stderr)
+        return False
     lineas = len(proceso.stderr.decode(errors="replace").splitlines())
-    verificar("abrir un dispositivo inválido no escribe nada en stderr", lineas == 0,
-              f"escribió {lineas} líneas")
+    verificar("PortAudio real rechaza un dispositivo inválido sin ruido en stderr",
+              proceso.returncode == 0 and b"PORTAUDIO_PROBADO" in proceso.stdout and lineas == 0,
+              f"salida={proceso.returncode}, stderr={lineas} líneas")
+    return True
 
 
 def probar_backoff():
@@ -214,7 +259,109 @@ def probar_backoff():
               audio_mod.ESPERA_MAXIMA_S == 60.0 and max(esperas) <= audio_mod.ESPERA_MAXIMA_S)
 
 
+def _por_callback(muestras, bloques):
+    """Pasa `muestras` (int16 a CAPTURE_SAMPLE_RATE) por el callback real, de a bloques."""
+    stream = audio_mod.AudioStream()
+    salida, i = [], 0
+    for largo in bloques:
+        trozo = muestras[i:i + largo]
+        if not len(trozo):
+            break
+        i += len(trozo)
+        stream.callback(trozo.reshape(-1, 1), len(trozo), None, None)
+        while not stream.q.empty():
+            salida.append(stream.q.get())
+    return np.concatenate(salida) if salida else np.array([], dtype=np.int16)
+
+
+def _pico_en(senal, frecuencia, ancho=200):
+    """Amplitud máxima del espectro alrededor de `frecuencia`, en Hz de salida."""
+    freqs = np.fft.rfftfreq(len(senal), 1 / SAMPLE_RATE)
+    espectro = np.abs(np.fft.rfft(senal.astype(np.float64) * np.hanning(len(senal))))
+    return espectro[(freqs > frecuencia - ancho) & (freqs < frecuencia + ancho)].max()
+
+
+def probar_antialias():
+    """
+    El remuestreo a 16 kHz tiene que filtrar antes de decimar.
+
+    Hasta el 2026-09-08 se quedaba con una de cada tres muestras sin filtro, así
+    que todo lo que el micrófono captaba por encima de 8 kHz se plegaba sobre la
+    banda de voz. Estas pruebas no abren el micrófono: le dan audio sintético al
+    callback real.
+    """
+    print("\nAntialias del remuestreo")
+    factor = audio_mod.FACTOR_DECIMACION
+    fir = audio_mod.FIR_ANTIALIAS
+    if fir is None:
+        verificar("no hace falta filtrar (captura y salida a la misma frecuencia)",
+                  CAPTURE_SAMPLE_RATE == SAMPLE_RATE)
+        return
+
+    rng = np.random.default_rng(0)
+    ruido = rng.normal(0, 3000, CAPTURE_SAMPLE_RATE).astype(np.int16)
+
+    # 1. Filtrar de a bloques tiene que dar lo mismo que filtrar todo junto: si el
+    #    estado del filtro no se conservara, habría un transitorio por bloque.
+    referencia = np.clip(
+        np.rint(lfilter(fir, 1.0, ruido.astype(np.float64))[::factor]), -32768, 32767
+    ).astype(np.int16)
+    obtenido = _por_callback(ruido, [1024] * (len(ruido) // 1024 + 1))
+    n = min(len(referencia), len(obtenido))
+    verificar("el filtrado en streaming es idéntico a filtrar la señal entera",
+              n > 0 and np.array_equal(referencia[:n], obtenido[:n]),
+              f"{n} muestras comparadas")
+
+    # 2. La rejilla de decimación no puede depender del tamaño de bloque, que
+    #    PortAudio elige y no tiene por qué ser múltiplo del factor.
+    irregular = _por_callback(ruido, [479, 1013, 257, 2048, 71] * 40)
+    n = min(len(obtenido), len(irregular))
+    verificar("el resultado no depende del tamaño de bloque",
+              n > 0 and np.array_equal(obtenido[:n], irregular[:n]),
+              f"bloques de 1024 vs irregulares, {n} muestras")
+
+    # 3. Un tono por encima de Nyquist tiene que desaparecer, no reaparecer abajo.
+    t = np.arange(CAPTURE_SAMPLE_RATE) / CAPTURE_SAMPLE_RATE
+    tono = (20000 * np.sin(2 * np.pi * 10000 * t)).astype(np.int16)
+    alias_sin_filtro = _pico_en(tono[::factor], 6000)   # lo que hacía el código viejo
+    alias_con_filtro = _pico_en(_por_callback(tono, [1024] * 47), 6000)
+    atenuacion = 20 * np.log10(max(alias_con_filtro, 1e-9) / max(alias_sin_filtro, 1e-9))
+    verificar("un tono de 10 kHz ya no se pliega sobre los 6 kHz", atenuacion < -40,
+              f"{atenuacion:.1f} dB respecto de decimar sin filtrar")
+
+    # 4. Y la voz real tiene que pasar intacta: subir una grabación de 16 kHz a la
+    #    frecuencia de captura y volver por el callback devuelve la misma señal.
+    grabaciones = sorted(RECORDINGS_DIR.glob("utterance_*.wav"))
+    if not grabaciones:
+        print("       (sin grabaciones en recordings/: me salteo la prueba con voz real)")
+        return
+    with wave.open(str(grabaciones[-1])) as w:
+        voz = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    subida = np.clip(resample_poly(voz.astype(np.float64), factor, 1), -32768, 32767).astype(np.int16)
+    vuelta = _por_callback(subida, [1024] * (len(subida) // 1024 + 1))
+    m = min(len(voz), len(vuelta))
+    # El FIR retrasa 80 muestras de captura: a 16 kHz son 26 2/3, no 27.
+    # Buscar solo retardos enteros daba 0.9583 sobre este mismo WAV aunque la
+    # señal estaba intacta. Se compensa el retardo conocido en la rejilla de
+    # captura, donde es entero, antes de medir la correlación (0.9995).
+    retardo_captura = (len(fir) - 1) // 2
+    vuelta_alineada = resample_poly(vuelta.astype(np.float64), factor, 1)[retardo_captura::factor]
+    n_alineadas = min(len(voz), len(vuelta_alineada))
+    correlacion = np.corrcoef(voz[:n_alineadas], vuelta_alineada[:n_alineadas])[0, 1]
+    verificar("la voz real atraviesa el filtro sin deformarse", correlacion > 0.99,
+              f"correlación {correlacion:.4f} con retardo compensado {retardo_captura / factor:.4f} muestras")
+
+    nivel = lambda a: 20 * np.log10(max(float(np.sqrt(np.mean(a.astype(float) ** 2))), 1e-9) / 32768)
+    verificar("el filtro no cambia el nivel de la voz",
+              abs(nivel(voz[:m]) - nivel(vuelta[:m])) < 0.5,
+              f"{nivel(voz[:m]):.2f} -> {nivel(vuelta[:m]):.2f} dBFS")
+
+
 def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--portaudio", action="store_true",
+                        help="agrega un sondeo real del backend, sin grabar voz")
+    args = parser.parse_args()
     print("Pruebas de entrada de audio — ninguna abre el micrófono real")
     probar_orden_de_candidatos()
     probar_filtro_de_plugins()
@@ -223,10 +370,12 @@ def main() -> int:
     probar_perdida_en_caliente()
     probar_silencio_de_alsa()
     probar_backoff()
+    probar_antialias()
+    backend_disponible = probar_portaudio() if args.portaudio else True
     print(f"\n{len(_fallos)} fallos de {_corridas} verificaciones")
     for f in _fallos:
         print(f"  {ROJO}-{FIN} {f}")
-    return 1 if _fallos else 0
+    return 1 if _fallos else (0 if backend_disponible else 2)
 
 
 if __name__ == "__main__":

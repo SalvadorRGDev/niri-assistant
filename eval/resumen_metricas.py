@@ -93,12 +93,23 @@ def main() -> int:
     if salidas:
         print(f"\n  tokens de salida del NLU: p50 {percentil(salidas, .50):.0f} · p95 {percentil(salidas, .95):.0f}")
 
-    falsos = sum(1 for t in turnos if t.get("falso_positivo"))
-    if falsos:
-        print(f"\n  wake word sin orden entendible: {falsos}/{len(turnos)} turnos "
-              f"({falsos / len(turnos):.0%}) — probables falsos positivos")
+    # 'falso_positivo' histórico no incluía capturas sin voz. Mostrar ambos
+    # casos sin cambiar los registros viejos ni convertir sospechas en verdad.
+    motivos = Counter()
+    for turno in turnos:
+        motivo = turno.get("motivo_sin_orden")
+        if motivo:
+            motivos[motivo] += 1
+        elif not turno.get("accion"):
+            motivos["historico_sin_accion"] += 1
+    if motivos:
+        sin_orden = sum(motivos.values())
+        print(f"\n  turnos sin acción: {sin_orden}/{len(turnos)} ({sin_orden / len(turnos):.0%})")
+        for motivo, cantidad in sorted(motivos.items()):
+            print(f"    {motivo:26} {cantidad:>4}")
+        print("  No equivale a falsos positivos confirmados ni a una tasa por hora.")
 
-    resueltos = Counter(t.get("origen") for t in turnos if t.get("origen"))
+    resueltos = Counter(t.get("origen") for t in turnos if t.get("origen") and t.get("accion"))
     if resueltos:
         con_orden = sum(resueltos.values())
         por_router = resueltos.get("router", 0)
@@ -111,7 +122,7 @@ def main() -> int:
             print(f"    {accion:22} {veces:>4}  ({veces / len(turnos) * 100:.0f}%)")
         vacios = sum(1 for t in turnos if not t.get("accion"))
         if vacios:
-            print(f"    {'(sin transcripción)':22} {vacios:>4}  ({vacios / len(turnos) * 100:.0f}%)")
+            print(f"    {'(sin acción)':22} {vacios:>4}  ({vacios / len(turnos) * 100:.0f}%)")
 
     return 0
 

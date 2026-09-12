@@ -1,0 +1,4 @@
+# Solo entrenamiento/exportación CPU; el runtime usa requirements.txt de la raíz.
+# NumPy y SciPy ya son dependencias del asistente. Sin PyTorch/TensorFlow ni GPU.
+onnx==1.22.0
+ml_dtypes==0.6.0

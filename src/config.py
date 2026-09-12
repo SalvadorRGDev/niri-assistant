@@ -74,20 +74,19 @@ STT_MODEL_SIZE = os.getenv("STT_MODEL_SIZE", "base")
 STT_MIN_AVG_LOGPROB = float(os.getenv("STT_MIN_AVG_LOGPROB", "-0.5"))
 STT_COMPUTE_TYPE = os.getenv("STT_COMPUTE_TYPE", "int8")
 
-# TTS — por defecto (ALLOW_CLOUD_TTS_FALLBACK=true) se prioriza la voz de
-# mujer en la nube (edge-tts, Elena) cuando hay internet; sin conexión, o con
-# el flag en false, cae a Piper (local, requiere 2 pasos manuales, ver
-# README.md: 1. pip install piper-tts  2. descargar una voz ES
-# .onnx a models/piper/) y por último a espeak-ng (offline, siempre).
+# TTS — Piper y espeak-ng se ejecutan siempre en local. La nube está apagada
+# por defecto: habilitar el flag solo permite edge-tts como último respaldo
+# para frases que el código marque explícitamente como públicas. Las respuestas
+# con nombres, rutas o contenido del usuario siguen siendo locales.
 PIPER_BINARY = os.getenv("PIPER_BINARY", "piper")
 # Voz rioplatense (daniela), elegida por ser la más parecida a la voz de la nube
-# que usa el asistente por defecto. Cuesta más que la mexicana que estaba antes
+# disponible como respaldo público opcional. Cuesta más que la mexicana anterior
 # —114 MB contra 60 en disco, 241 ms contra 60 por frase, 843 ms contra 533 al
 # cargar— y aun así es 4x más rápida que edge-tts, que ronda los 900 ms.
 # src/tts.py acepta cualquier .onnx de models/piper/ si este no está.
 PIPER_VOICE_MODEL = Path(os.getenv(
     "PIPER_VOICE_MODEL", str(MODELS_DIR / "piper" / "es_AR-daniela-high.onnx")))
-ALLOW_CLOUD_TTS_FALLBACK = os.getenv("ALLOW_CLOUD_TTS_FALLBACK", "true").lower() in ("1", "true", "yes")
+ALLOW_CLOUD_TTS_FALLBACK = os.getenv("ALLOW_CLOUD_TTS_FALLBACK", "false").lower() in ("1", "true", "yes")
 
 # UX
 BEEP_ON_WAKE_WORD = True

@@ -29,12 +29,24 @@ sys.path.insert(0, str(BASE_DIR))
 
 import numpy as np  # noqa: E402
 
+from eval.calidad_audio import tiene_voz  # noqa: E402
 from src.wake_word import WakeWordDetector  # noqa: E402
-from src.config import RECORDINGS_DIR, WAKE_WORD_THRESHOLD, WAKE_WORD_TRIGGER_LEVEL  # noqa: E402
+from src.config import (RECORDINGS_DIR, SAMPLE_RATE, WAKE_WORD_THRESHOLD,  # noqa: E402
+                        WAKE_WORD_TRIGGER_LEVEL)
 
 POSITIVOS = RECORDINGS_DIR / "wakeword_positivos"
 NEGATIVOS = RECORDINGS_DIR / "falsos_positivos"
 CHUNK = 1280
+
+# Silencio que se agrega antes y después de cada grabación. El clasificador
+# necesita 16 embeddings (1.28 s) más el contexto del extractor de rasgos, así
+# que sobre un archivo de 2 s la última ventana que alcanza a formarse termina
+# donde termina el archivo: si el "oye niri" quedó pegado al final —y queda,
+# porque entre el aviso de GRABANDO y la voz hay reacción humana—, el modelo
+# nunca ve la palabra completa. Sin este relleno, muestras buenas puntuaban
+# 0.002 y con él 0.962. En producción el stream es continuo y ese corte no
+# existe: el relleno reproduce esa condición, no la maquilla.
+RELLENO = np.zeros(SAMPLE_RATE, dtype=np.int16)
 
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m"
 
@@ -43,6 +55,7 @@ def puntajes_de(detector: WakeWordDetector, ruta: Path) -> list[float]:
     """Todos los puntajes por frame de un archivo, como los vería en streaming."""
     with wave.open(str(ruta)) as w:
         audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+    audio = np.concatenate([RELLENO, audio, RELLENO])
 
     detector.oww_features.reset()
     detector.oww_model.reset()
@@ -73,6 +86,25 @@ def resumen(nombre: str, archivos: list[Path], detector) -> list[list[float]]:
     return todos
 
 
+def con_voz(archivos: list[Path]) -> tuple[list[Path], list[tuple[Path, str]]]:
+    """
+    Separa los positivos utilizables de los que no contienen voz.
+
+    Un positivo mudo (un golpe a la laptop, un roce del micrófono) puntúa bajo
+    igual que un "oye niri" que el modelo no reconoció, y la grilla no puede
+    distinguirlos: uno solo alcanza para concluir "hay que reentrenar" cuando
+    en realidad la muestra estaba mal. Las dos primeras muestras grabadas en
+    este proyecto eran exactamente eso.
+    """
+    utiles, descartados = [], []
+    for a in archivos:
+        with wave.open(str(a)) as w:
+            audio = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
+        ok, motivo = tiene_voz(audio)
+        (utiles if ok else descartados).append(a if ok else (a, motivo))
+    return utiles, descartados
+
+
 def main() -> int:
     pos_archivos = sorted(POSITIVOS.glob("*.wav"))
     neg_archivos = sorted(NEGATIVOS.glob("*.wav"))
@@ -86,12 +118,38 @@ def main() -> int:
               "cada disparo que no produjo ninguna orden.")
         return 2
 
+    pos_archivos, sin_voz = con_voz(pos_archivos)
+    if sin_voz:
+        print(f"{AMARILLO}Descarto {len(sin_voz)} positivo(s) que no contienen voz:{FIN}")
+        for a, motivo in sin_voz:
+            print(f"  {GRIS}{a.name}: {motivo}{FIN}")
+        print(f"{GRIS}Los archivos quedan donde están; simplemente no entran al "
+              f"análisis.{FIN}")
+    if not pos_archivos:
+        print(f"\n{ROJO}No queda ningún positivo utilizable.{FIN} Volvé a grabarlos "
+              "con: .venv/bin/python eval/grabar_wakeword.py")
+        return 2
+
     detector = WakeWordDetector()
-    print(f"Configuración actual: umbral {WAKE_WORD_THRESHOLD}, "
+    print(f"\nConfiguración actual: umbral {WAKE_WORD_THRESHOLD}, "
           f"{WAKE_WORD_TRIGGER_LEVEL} frames consecutivos")
 
     pos = resumen("POSITIVOS (vos diciendo 'oye niri')", pos_archivos, detector)
     neg = resumen("NEGATIVOS (ruido que disparó el wake word)", neg_archivos, detector)
+
+    # AUC: probabilidad de que un positivo puntúe más alto que un negativo tomados
+    # al azar. Responde "¿alcanza con mover el umbral?" sin depender de la grilla:
+    # 1.0 = separables con algún umbral, 0.5 = azar, <0.5 = el modelo prefiere el
+    # ruido, y ahí ningún umbral puede arreglarlo porque el orden ya está mal.
+    picos_pos = [max(p) if p else 0.0 for p in pos]
+    picos_neg = [max(n) if n else 0.0 for n in neg]
+    auc = statistics.fmean(
+        1.0 if a > b else 0.5 if a == b else 0.0
+        for a in picos_pos for b in picos_neg)
+    color = VERDE if auc >= 0.9 else AMARILLO if auc > 0.5 else ROJO
+    print(f"\nOrdenamiento — AUC {color}{auc:.3f}{FIN} "
+          f"{GRIS}(1.0 = separables con algún umbral · 0.5 = azar · "
+          f"<0.5 = puntúa más alto el ruido){FIN}")
 
     # Grilla: para cada par (umbral, racha), cuántos positivos se detectan y
     # cuántos negativos se cuelan. El objetivo es 100% de positivos con 0 falsos.
@@ -129,6 +187,10 @@ def main() -> int:
         print("Queda demostrado que ajustar los umbrales no alcanza: hay que reentrenar "
               "el wake word con negativos de este micrófono, que son justo los que se "
               "están juntando en recordings/falsos_positivos/.")
+        if auc < 0.5:
+            print(f"Con AUC {auc:.3f} no es que el umbral esté mal puesto: el modelo "
+                  "ordena el ruido por encima de la voz real, y ningún umbral "
+                  "reordena una lista.")
     print(f"\n{GRIS}Muestras chicas engañan: con menos de ~25 positivos, tomar esto como "
           f"definitivo es repetir el error del beam_size (ver README.md).{FIN}")
     return 0

@@ -28,12 +28,12 @@ _DESPEDIDAS = [
 
 
 def saludo(action: FileAction) -> ExecutionResult:
-    return ExecutionResult(text=random.choice(_SALUDOS))
+    return ExecutionResult(text=random.choice(_SALUDOS), public_tts=True)
 
 
 def chiste(action: FileAction) -> ExecutionResult:
-    return ExecutionResult(text=random.choice(_CHISTES))
+    return ExecutionResult(text=random.choice(_CHISTES), public_tts=True)
 
 
 def despedida(action: FileAction) -> ExecutionResult:
-    return ExecutionResult(text=random.choice(_DESPEDIDAS))
+    return ExecutionResult(text=random.choice(_DESPEDIDAS), public_tts=True)

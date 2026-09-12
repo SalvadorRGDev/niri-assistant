@@ -5,10 +5,37 @@ from contextlib import contextmanager
 
 import sounddevice as sd
 import numpy as np
+from scipy.signal import firwin, lfilter
 from src.config import SAMPLE_RATE, CAPTURE_SAMPLE_RATE, CHANNELS, AUDIO_DEVICE
 from src.logger import get_logger
 
 logger = get_logger("AudioStream")
+
+# --- Remuestreo de CAPTURE_SAMPLE_RATE a SAMPLE_RATE -------------------------
+#
+# Quedarse con una de cada `FACTOR_DECIMACION` muestras es correcto solo si
+# antes se saca todo lo que está por encima de la nueva frecuencia de Nyquist
+# (8 kHz). Sin ese filtro —que es lo que hacía este módulo hasta el 2026-09-08—
+# el contenido de 8 a 24 kHz no se pierde: se *pliega* sobre la banda de voz,
+# donde ya no se distingue de la señal real. Es ruido que depende de la
+# respuesta de agudos de cada micrófono, así que además vuelve el audio del
+# micrófono interno distinto del USB con el que se entrenó el wake word.
+#
+# 161 coeficientes dejan la banda que se pliega 53.8 dB abajo con un rizado de
+# 0.02 dB hasta 6 kHz, y cuestan 20 us por bloque: 0.20% de un núcleo, medido
+# acá. El corte va en 7.5 kHz para llegar atenuado a 8 kHz sin comerse los
+# agudos de las fricativas.
+FACTOR_DECIMACION = CAPTURE_SAMPLE_RATE // SAMPLE_RATE
+if CAPTURE_SAMPLE_RATE % SAMPLE_RATE:
+    # Con una razón no entera la decimación daría una frecuencia de muestreo
+    # equivocada sin ningún síntoma visible: todo el pipeline seguiría andando
+    # con el audio acelerado. Mejor no arrancar.
+    raise ValueError(
+        f"CAPTURE_SAMPLE_RATE ({CAPTURE_SAMPLE_RATE}) tiene que ser múltiplo "
+        f"entero de SAMPLE_RATE ({SAMPLE_RATE}) para decimar."
+    )
+FIR_ANTIALIAS = (firwin(161, 7500, fs=CAPTURE_SAMPLE_RATE)
+                 if FACTOR_DECIMACION > 1 else None)
 
 # Nombres de los dispositivos mediados por el servidor de sonido. Se prueban
 # después del default porque siguen la fuente que el usuario eligió en el
@@ -152,6 +179,15 @@ class AudioStream:
         self.stream = None
         self.buffer = np.array([], dtype=np.int16)
 
+        # Estado del filtro antialias y fase de la decimación. Los dos viven
+        # entre llamadas porque el callback ve el audio de a bloques y el
+        # filtrado tiene que ser continuo: reiniciarlos en cada bloque metería
+        # un transitorio cada pocos milisegundos, y perder la fase cambiaría el
+        # espaciado entre muestras justo en el borde. Solo los escribe el
+        # callback, que corre en un único hilo de PortAudio.
+        self._zi_antialias = np.zeros(len(FIR_ANTIALIAS) - 1) if FIR_ANTIALIAS is not None else None
+        self._fase_decimacion = 0
+
         if isinstance(self.preferido, str):
             self.preferido = _resolver_por_nombre(self.preferido)
 
@@ -162,10 +198,19 @@ class AudioStream:
         # Obtenemos la data original (shape: frames, channels)
         raw_data = indata.copy()[:, 0]
 
-        # Remuestreo simple (decimation) para mantener la continuidad de fase entre chunks
-        if CAPTURE_SAMPLE_RATE != SAMPLE_RATE:
-            factor = CAPTURE_SAMPLE_RATE // SAMPLE_RATE
-            resampled_data = raw_data[::factor]
+        # Antialias + decimación, manteniendo la continuidad entre bloques.
+        if FIR_ANTIALIAS is not None:
+            filtrado, self._zi_antialias = lfilter(
+                FIR_ANTIALIAS, 1.0, raw_data.astype(np.float64), zi=self._zi_antialias)
+            muestras = filtrado[self._fase_decimacion::FACTOR_DECIMACION]
+            # Dónde cae la próxima muestra a conservar, ya en coordenadas del
+            # bloque siguiente. Sin esto, un bloque de largo no múltiplo de
+            # FACTOR_DECIMACION correría la rejilla y el audio saldría con
+            # saltos de una muestra en cada borde.
+            self._fase_decimacion = (self._fase_decimacion - len(raw_data)) % FACTOR_DECIMACION
+            # El filtro puede sobrepasar el rango en un transitorio (Gibbs), así
+            # que se recorta antes de volver a int16 en vez de dar la vuelta.
+            resampled_data = np.clip(np.rint(muestras), -32768, 32767).astype(np.int16)
         else:
             resampled_data = raw_data
 

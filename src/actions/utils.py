@@ -138,7 +138,9 @@ def traduccion(action: FileAction) -> ExecutionResult:
                 {"role": "user", "content": f"Traducí a {idioma}: {texto}"},
             ],
             options={"temperature": 0.3},
-            keep_alive=0,
+            # Comparte modelo con el NLU: descargarlo aquí vuelve frío el
+            # siguiente comando aunque el NLU haya pedido conservarlo 30 min.
+            keep_alive="30m",
         )
         traduccion_texto = response.message.content.strip()
         logger.info(f"Traducción ({idioma}): {texto!r} -> {traduccion_texto!r}")

@@ -19,6 +19,7 @@ from src.router import route
 from src.executor import Executor
 from src.tts import TextToSpeech
 from src.confirm import interpret_confirmation
+from src.audit import log_action
 from src.paths import parse_location_speech, speakable_path, DEFAULT_ROOT
 from src.actions.dispatch import dispatch as dispatch_non_file_action, NON_FILE_ACTIONS
 from src.actions.time_actions import check_due_timers
@@ -110,11 +111,11 @@ class MainLoop:
 
     def guardar_falso_positivo(self):
         """
-        Guarda el audio previo a un disparo que no produjo ninguna orden.
+        Guarda un candidato a falso positivo: disparo que no produjo una orden.
 
         Va a `recordings/falsos_positivos/` y no a `recordings/`, para no mezclar
-        negativos con las órdenes reales del usuario: el día que se reentrene el
-        wake word, esa separación es justo lo que hace usable el material.
+        casos sospechosos con las órdenes. No es una etiqueta confirmada: el
+        usuario pudo decir el wake word sin continuar, o fallar el STT.
         """
         if self.preroll_del_turno is None or len(self.preroll_del_turno) == 0:
             return
@@ -127,7 +128,7 @@ class MainLoop:
                 wf.setsampwidth(2)
                 wf.setframerate(SAMPLE_RATE)
                 wf.writeframes(self.preroll_del_turno.tobytes())
-            logger.info(f"Falso positivo del wake word guardado en {destino.name} "
+            logger.info(f"Candidato a falso positivo guardado en {destino.name} "
                         f"({len(self.preroll_del_turno) / SAMPLE_RATE:.1f}s previos al disparo).")
         except Exception as e:
             logger.warning(f"No pude guardar el audio del falso positivo: {e}")
@@ -284,13 +285,14 @@ class MainLoop:
             return nullcontext()
         return self.turno.etapa(nombre)
 
-    def _say(self, text: str):
+    def _say(self, text: str, *, public: bool = False) -> bool:
         """Habla `text` y limpia la cola de audio para ignorar el eco de la propia voz."""
         if not text:
-            return
+            return False
         with self._medir("tts"):
-            self.tts.speak(text)
-        self.audio.q.queue.clear()
+            spoken = self.tts.speak(text, public=public)
+        self.audio.reset_buffers()
+        return spoken
 
     def _listen_reply(self, max_wait_seconds: float = 6.0) -> str:
         """Captura una respuesta corta del usuario y la transcribe. Devuelve
@@ -305,14 +307,16 @@ class MainLoop:
     def _ask_location(self, question: str) -> Optional[Path]:
         """Pregunta una ubicación por voz e intenta resolverla a una ruta
         dentro de la whitelist. Devuelve None si no se entendió."""
-        self._say(question)
+        if not self._say(question):
+            return None
         answer = self._listen_reply(max_wait_seconds=6.0)
         logger.info(f"[UBICACIÓN USUARIO]: {answer}")
         return parse_location_speech(answer)
 
     def _confirm_yes_no(self, question: str) -> bool:
         """Hace una pregunta de sí/no y devuelve la decisión (fail-safe: no ante duda)."""
-        self._say(question)
+        if not self._say(question):
+            return False
         answer = self._listen_reply(max_wait_seconds=5.0)
         logger.info(f"[CONFIRMACIÓN USUARIO]: {answer}")
         return interpret_confirmation(answer) is True
@@ -330,8 +334,8 @@ class MainLoop:
                 "¿En qué carpeta lo creo? Puedo usar Proyectos o Clases."
             )
         if base_dir is None:
-            logger.warning(f"No se entendió la ubicación pedida para crear '{action.nombre}'. Usando Proyectos por defecto.")
-            base_dir = DEFAULT_ROOT
+            self._say("No entendí la ubicación. Operación cancelada.")
+            return None
 
         pregunta = f"Voy a crear '{action.nombre}' en {speakable_path(base_dir)}. ¿Confirmás?"
         if self._confirm_yes_no(pregunta):
@@ -339,12 +343,17 @@ class MainLoop:
         self._say("Entendido, operación cancelada.")
         return None
 
-    def _resolve_existing_location(self, nombre: str) -> Optional[Path]:
+    def _resolve_existing_location(self, nombre: str, location: str = "") -> Optional[Path]:
         """
         Ubica un archivo/carpeta EXISTENTE entre las raíces permitidas
         (eliminar/mover/leer). Si aparece en más de una, o en ninguna,
         pregunta al usuario dónde está. Devuelve None si no se pudo resolver.
         """
+        if location:
+            base_dir = parse_location_speech(location)
+            if base_dir is None:
+                self._say("No entendí la ubicación. Operación cancelada.")
+            return base_dir
         matches = self.executor.find_existing_roots(nombre)
         if len(matches) == 1:
             return matches[0]
@@ -387,12 +396,14 @@ class MainLoop:
         ubicación ya resuelta (no vuelve a preguntar por la ruta). Ante
         silencio o respuesta ambigua, cancela por seguridad.
         """
-        self._say(question)
+        if not self._say(question):
+            self._cancel_action(action, original_text, "No pude reproducir la confirmación. Operación cancelada.")
+            return
         answer = self._listen_reply(max_wait_seconds=5.0)
 
         if not answer:
             logger.warning(f"Sin respuesta de confirmación para: {action}. Cancelado por seguridad.")
-            self._say("No escuché una confirmación. Operación cancelada por seguridad.")
+            self._cancel_action(action, original_text, "No escuché una confirmación. Operación cancelada por seguridad.")
             return
 
         logger.info(f"[CONFIRMACIÓN USUARIO]: {answer}")
@@ -401,10 +412,10 @@ class MainLoop:
         if decision is True:
             result = self.executor.execute(action, base_dir=base_dir, raw_text=original_text,
                                              confirmed=True, destino_dir=destino_dir)
-            self._say(result.text)
+            self._say(result.text, public=result.public_tts)
         else:
             logger.info(f"Acción cancelada (respuesta: '{answer}'). NO ejecutada: {action}")
-            self._say("Entendido, operación cancelada.")
+            self._cancel_action(action, original_text, "Entendido, operación cancelada.")
 
     def _confirm_non_file_action(self, action, original_text: str, question: str):
         """
@@ -416,27 +427,39 @@ class MainLoop:
         banco de evaluación, donde "apagá el bluetooth" se clasificaba como
         energia/apagar y llegaba a `systemctl poweroff` sin preguntar.
         """
-        self._say(question)
+        if not self._say(question):
+            self._cancel_action(action, original_text, "No pude reproducir la confirmación. Operación cancelada.")
+            return
         answer = self._listen_reply(max_wait_seconds=5.0)
 
         if not answer:
             logger.warning(f"Sin respuesta de confirmación para: {action}. Cancelado por seguridad.")
-            self._say("No escuché una confirmación. Operación cancelada por seguridad.")
+            self._cancel_action(action, original_text, "No escuché una confirmación. Operación cancelada por seguridad.")
             return
 
         logger.info(f"[CONFIRMACIÓN USUARIO]: {answer}")
         if interpret_confirmation(answer) is True:
             result = dispatch_non_file_action(action, raw_text=original_text, confirmed=True)
-            self._say(result.text)
+            self._say(result.text, public=result.public_tts)
         else:
             logger.info(f"Acción cancelada (respuesta: '{answer}'). NO ejecutada: {action}")
-            self._say("Entendido, operación cancelada.")
+            self._cancel_action(action, original_text, "Entendido, operación cancelada.")
+
+    def _cancel_action(self, action, text: str, reason: str, *, speak: bool = True):
+        log_action(text, action.model_dump(), reason,
+                   extra={"origen": "main_loop", "cancelado": True})
+        if speak:
+            self._say(reason)
 
     def _dispatch_action(self, action, text: str):
         """Resuelve ubicación (preguntando/confirmando cuando hace falta) y ejecuta la acción."""
+        # Registrar antes del diálogo: también cuentan los intentos que no
+        # llegan al ejecutor por silencio, ubicación inválida o una excepción.
+        log_action(text, action.model_dump(), "Intención recibida; pendiente de validar.",
+                   extra={"origen": "main_loop", "etapa": "recibida"})
         if action.action == "ninguna":
             result = self.executor.execute(action, raw_text=text)
-            self._say(result.text)
+            self._say(result.text, public=result.public_tts)
             return
 
         if action.action in NON_FILE_ACTIONS:
@@ -444,44 +467,78 @@ class MainLoop:
             if result.needs_confirmation:
                 self._confirm_non_file_action(action, text, result.text)
             else:
-                self._say(result.text)
+                self._say(result.text, public=result.public_tts)
             return
 
         if action.action != "listar" and not action.nombre:
-            self._say("Lo siento, necesito que me digas un nombre para el archivo o carpeta.")
+            self._cancel_action(action, text, "Lo siento, necesito que me digas un nombre para el archivo o carpeta.")
             return
 
         if action.action in CREATE_ACTIONS:
             base_dir = self._resolve_create_location(action)
             if base_dir is None:
+                self._cancel_action(action, text, "Creación cancelada: ubicación o confirmación no aceptada.", speak=False)
                 return  # ya se avisó "operación cancelada"
             result = self.executor.execute(action, base_dir=base_dir, raw_text=text)
-            self._say(result.text)
+            self._say(result.text, public=result.public_tts)
             return
 
         if action.action in LOCATE_EXISTING_ACTIONS:
-            base_dir = self._resolve_existing_location(action.nombre)
+            base_dir = self._resolve_existing_location(action.nombre, action.ruta_base)
             if base_dir is None:
+                self._cancel_action(action, text, "Operación cancelada: ubicación no resuelta.", speak=False)
                 return
 
             destino_dir = None
             if action.action == "mover":
                 destino_dir = self._resolve_move_destination(action, base_dir)
                 if destino_dir is None:
-                    self._say("No entendí a dónde moverlo. Operación cancelada.")
+                    self._cancel_action(action, text, "No entendí a dónde moverlo. Operación cancelada.")
                     return
 
             result = self.executor.execute(action, base_dir=base_dir, raw_text=text, destino_dir=destino_dir)
             if result.needs_confirmation:
                 self._handle_confirmation(action, text, result.text, base_dir=base_dir, destino_dir=destino_dir)
             else:
-                self._say(result.text)
+                self._say(result.text, public=result.public_tts)
             return
 
         # listar (y cualquier acción futura sin ubicación interactiva)
-        base_dir = parse_location_speech(action.ruta_base) or DEFAULT_ROOT
+        base_dir = parse_location_speech(action.ruta_base) if action.ruta_base else DEFAULT_ROOT
+        if base_dir is None:
+            self._cancel_action(action, text, "No entendí la ubicación. Operación cancelada.")
+            return
         result = self.executor.execute(action, base_dir=base_dir, raw_text=text)
-        self._say(result.text)
+        self._say(result.text, public=result.public_tts)
+
+    def _procesar_audio(self, utterance_audio):
+        """Procesa una captura y distingue falta de voz, de texto y de backend."""
+        if utterance_audio is None:
+            self.guardar_falso_positivo()
+            return None, None, "sin_voz"
+
+        self.save_utterance(utterance_audio)
+        with self._medir("stt"):
+            text = self.stt.transcribe(utterance_audio)
+        if not text or not any(c.isalpha() for c in text):
+            self.guardar_falso_positivo()
+            return None, None, "sin_transcripcion"
+
+        with self._medir("router"):
+            action = route(text)
+        origen = "router"
+        if action is None:
+            origen = "nlu"
+            with self._medir("nlu"):
+                action = self.nlu.parse(text)
+            if self.nlu.last_error:
+                message = "El motor de comprensión falló o devolvió una respuesta inválida. Operación cancelada."
+                if self.nlu.last_error in {"ConnectError", "ConnectionError", "ConnectTimeout"}:
+                    message = "No pude conectar con el motor de comprensión. Revisá que Ollama esté iniciado."
+                self._cancel_action(action, text, message)
+                return None, origen, "error_nlu"
+        self._dispatch_action(action, text)
+        return action.action, origen, None
 
     def run(self):
         self.running = True
@@ -519,42 +576,10 @@ class MainLoop:
 
                     elif self.state == State.LISTENING:
                         self.turno = TurnoMetricas()
-                        accion_del_turno = None
-                        origen_intencion = None
-                        falso_positivo = False
-
                         with self._medir("vad"):
                             utterance_audio = self.capture_utterance(max_wait_seconds=3.0)
 
-                        if utterance_audio is not None:
-                            self.save_utterance(utterance_audio)
-
-                            with self._medir("stt"):
-                                text = self.stt.transcribe(utterance_audio)
-                            # Whisper can hallucinate spaces or symbols, so check if there's actual text
-                            if text and any(c.isalpha() for c in text):
-                                logger.info(f"[USER SAYS]: {text}")
-
-                                # El router resuelve las órdenes de vocabulario
-                                # cerrado sin tocar la GPU; si no reconoce la
-                                # orden entera devuelve None y sigue el camino
-                                # de siempre.
-                                with self._medir("router"):
-                                    action = route(text)
-                                origen_intencion = "router"
-                                if action is None:
-                                    origen_intencion = "nlu"
-                                    with self._medir("nlu"):
-                                        action = self.nlu.parse(text)
-                                accion_del_turno = action.action
-                                self._dispatch_action(action, text)
-                            else:
-                                # El wake word disparó pero no hubo ninguna orden
-                                # entendible: casi siempre es un falso positivo
-                                # del wake word. Se anota para medir la tasa.
-                                falso_positivo = True
-                                self.guardar_falso_positivo()
-                                logger.info("Discarding empty or noise-only transcription.")
+                        accion_del_turno, origen_intencion, motivo = self._procesar_audio(utterance_audio)
 
                         # Una línea por turno en logs/metrics.jsonl. Los tokens
                         # solo se anotan si el NLU corrió de verdad: si contestó
@@ -564,7 +589,11 @@ class MainLoop:
                         self.turno.registrar(
                             accion=accion_del_turno,
                             origen=origen_intencion,
-                            falso_positivo=falso_positivo or None,
+                            sin_orden=motivo is not None,
+                            motivo_sin_orden=motivo,
+                            # Campo histórico: significa sospecha, no etiqueta
+                            # supervisada ni tasa de falsos positivos por hora.
+                            falso_positivo=motivo in {"sin_voz", "sin_transcripcion"},
                             audio_s=(round(len(utterance_audio) / SAMPLE_RATE, 2)
                                      if utterance_audio is not None else None),
                             tokens_prompt=tokens.get("prompt_tokens"),

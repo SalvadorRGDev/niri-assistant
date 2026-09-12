@@ -31,12 +31,16 @@ sys.path.insert(0, str(BASE_DIR))
 
 import numpy as np  # noqa: E402
 
+from eval.calidad_audio import tiene_voz  # noqa: E402
 from src.audio import AudioStream, _descripcion  # noqa: E402
 from src.config import RECORDINGS_DIR, SAMPLE_RATE, CHANNELS  # noqa: E402
 
 DESTINO = RECORDINGS_DIR / "wakeword_positivos"
 SEGUNDOS_POR_MUESTRA = 2.0
 CHUNK = 1280  # 80 ms, el mismo tamaño que consume el wake word en producción
+# Reintentos cuando la muestra sale sin voz (ver tiene_voz). Dos alcanzan:
+# más que eso convierte la sesión de 3 minutos en una pelea con el micrófono.
+INTENTOS_POR_MUESTRA = 2
 
 VERDE, ROJO, AMARILLO, GRIS, FIN = "\033[32m", "\033[31m", "\033[33m", "\033[90m", "\033[0m"
 
@@ -81,10 +85,14 @@ def main() -> int:
 
     if servicio_activo():
         print(f"{ROJO}niri.service está corriendo y tiene el micrófono tomado.{FIN}")
-        print("El micrófono es de acceso exclusivo, así que hay que pararlo antes:\n")
-        print("  systemctl --user stop niri.service")
-        print("  .venv/bin/python eval/grabar_wakeword.py")
-        print("  systemctl --user start niri.service")
+        print("El micrófono es de acceso exclusivo, así que hay que pararlo antes.")
+        # Una sola línea, porque entre un `stop` suelto y esta grabación hay una
+        # ventana en la que el servicio puede volver a arrancar y tomar el
+        # micrófono otra vez. El `;` final levanta el servicio aunque la
+        # grabación falle o la cortes con Ctrl+C. Sintaxis válida en fish y bash.
+        print(f"\n  {VERDE}systemctl --user stop niri.service; "
+              f".venv/bin/python eval/grabar_wakeword.py; "
+              f"systemctl --user start niri.service{FIN}\n")
         return 1
 
     DESTINO.mkdir(parents=True, exist_ok=True)
@@ -105,23 +113,37 @@ def main() -> int:
     print(f"\n{GRIS}Ctrl+C para cortar; lo grabado hasta ahí se conserva.{FIN}")
     input("\nEnter para empezar... ")
 
-    niveles, guardadas = [], 0
+    niveles, guardadas, descartadas = [], 0, 0
     try:
         for i in range(1, args.cantidad + 1):
             variacion = VARIACIONES[(i - 1) * len(VARIACIONES) // args.cantidad]
             print(f"\n[{i}/{args.cantidad}] {variacion}")
-            for cuenta in (3, 2, 1):
-                print(f"  {cuenta}...", end="\r", flush=True)
-                time.sleep(0.7)
-            # Descartar lo que se acumuló durante la cuenta regresiva, que es
-            # ruido de fondo y no la muestra.
-            stream.reset_buffers()
-            print(f"  {VERDE}GRABANDO{FIN}          ", end="\r", flush=True)
 
-            audio = grabar_una(stream, SEGUNDOS_POR_MUESTRA)
-            nivel = nivel_dbfs(audio)
+            for intento in range(1, INTENTOS_POR_MUESTRA + 1):
+                for cuenta in (3, 2, 1):
+                    print(f"  {cuenta}...", end="\r", flush=True)
+                    time.sleep(0.7)
+                # Descartar lo que se acumuló durante la cuenta regresiva, que es
+                # ruido de fondo y no la muestra.
+                stream.reset_buffers()
+                print(f"  {VERDE}GRABANDO{FIN}          ", end="\r", flush=True)
+
+                audio = grabar_una(stream, SEGUNDOS_POR_MUESTRA)
+                nivel = nivel_dbfs(audio)
+                hay_voz, motivo = tiene_voz(audio)
+                if hay_voz:
+                    break
+                # Una muestra sin voz no se guarda: el análisis no puede
+                # distinguirla después de un "oye niri" que el modelo falló, y
+                # una sola contamina la conclusión (ver MIN_PCT_VOZ).
+                descartadas += 1
+                rehago = "repito esta" if intento < INTENTOS_POR_MUESTRA else "sigo con la próxima"
+                print(f"  {AMARILLO}descartada: {motivo} — {rehago}{FIN}")
+
+            if not hay_voz:
+                continue
+
             niveles.append(nivel)
-
             sello = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")[:-3]
             destino = DESTINO / f"oye_niri_{sello}.wav"
             with wave.open(str(destino), "wb") as wf:
@@ -148,6 +170,8 @@ def main() -> int:
               f"(nivel mediano {sorted(niveles)[len(niveles)//2]:.0f} dBFS)")
         negativos = len(list((RECORDINGS_DIR / 'falsos_positivos').glob('*.wav')))
         print(f"Negativos disponibles para comparar: {negativos}")
+        if descartadas:
+            print(f"{GRIS}({descartadas} intentos descartados por no contener voz){FIN}")
         print(f"\n{GRIS}Ahora: systemctl --user start niri.service{FIN}")
     return 0
 

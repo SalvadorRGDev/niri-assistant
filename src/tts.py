@@ -3,7 +3,10 @@ import asyncio
 import subprocess
 import shutil
 import sys
+import tempfile
+import threading
 import wave
+from contextlib import contextmanager
 from pathlib import Path
 
 from src.logger import get_logger
@@ -11,14 +14,27 @@ from src.config import PIPER_BINARY, PIPER_VOICE_MODEL, ALLOW_CLOUD_TTS_FALLBACK
 
 logger = get_logger("TTS")
 
-# Voz neuronal de Edge: Elena (Argentina), voz de mujer, para sonar más
-# amigable. ALLOW_CLOUD_TTS_FALLBACK=true por defecto, así que esta es la
-# voz preferida siempre que haya internet; si se apaga el flag, o no hay
-# conexión, el asistente cae a Piper -> espeak-ng (100% local).
+# Voz opcional para frases públicas, solo después de agotar los motores locales
+# y cuando el operador haya habilitado ALLOW_CLOUD_TTS_FALLBACK explícitamente.
 EDGE_VOICE = "es-AR-ElenaNeural"
 EDGE_TTS_TIMEOUT_SECONDS = 8  # evita colgar el turno de voz si la red está lenta/caída
-TEMP_WAV_FILE = "/tmp/niri_response.wav"
-TEMP_MP3_FILE = "/tmp/niri_response.mp3"
+
+
+@contextmanager
+def _audio_temporal(suffix: str):
+    """Cada respuesta tiene su archivo privado (0600), eliminado aun si falla."""
+    with tempfile.NamedTemporaryFile(prefix="niri_response_", suffix=suffix,
+                                     delete=False) as audio:
+        path = audio.name
+    try:
+        yield path
+    finally:
+        try:
+            os.unlink(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            logger.warning("No pude limpiar el audio temporal (%s).", type(exc).__name__)
 
 
 def _buscar_voz_piper() -> Path | None:
@@ -57,15 +73,14 @@ def _buscar_binario_piper() -> str | None:
 
 class TextToSpeech:
     """
-    Cadena de motores TTS, de más a menos preferido:
-      1. edge-tts (nube, voz de mujer Elena, la más amigable) — SOLO si
-         ALLOW_CLOUD_TTS_FALLBACK=true y hay internet; si falla, sigue con:
-      2. Piper (100% local, calidad neuronal) — requiere el binario `piper`
-         y una voz .onnx en models/piper/. Ver README.md.
-      3. espeak-ng (100% local, calidad robótica) — último recurso siempre.
+    Piper → espeak-ng; edge-tts es un respaldo opcional para texto público.
+
+    Las llamadas existentes son privadas por defecto, incluso si se habilita
+    la nube. Nunca marcar como público texto que derive de datos del usuario.
     """
 
     def __init__(self):
+        self._speak_lock = threading.Lock()
         # Verificar que tenemos un reproductor de audio disponible
         self.player = None
         for candidate in ("mpv", "ffplay"):
@@ -74,7 +89,7 @@ class TextToSpeech:
                 break
 
         if self.player is None:
-            logger.warning("No se encontró mpv ni ffplay. Ningún motor TTS podrá reproducir audio.")
+            logger.warning("No se encontró mpv ni ffplay. Solo espeak-ng podrá reproducir audio.")
 
         # Piper: motor local principal. Se prefiere la API en proceso sobre el
         # binario porque el costo de Piper es cargar el modelo, no sintetizar:
@@ -86,13 +101,14 @@ class TextToSpeech:
         voz = _buscar_voz_piper()
         self.piper_voz_path = voz
         if voz is not None:
+            self.piper_bin = _buscar_binario_piper()
             try:
                 from piper import PiperVoice  # import perezoso: es opcional
                 self.piper_voz = PiperVoice.load(str(voz))
                 logger.info(f"Piper cargado en memoria ({voz.name}).")
-            except Exception as e:
-                logger.warning(f"No pude cargar Piper en proceso ({e}); pruebo con el binario.")
-                self.piper_bin = _buscar_binario_piper()
+            except Exception as exc:
+                logger.warning("No pude cargar Piper en proceso (%s); pruebo con el binario.",
+                               type(exc).__name__)
         self.has_piper = self.piper_voz is not None or self.piper_bin is not None
         if not self.has_piper:
             logger.warning(
@@ -117,71 +133,74 @@ class TextToSpeech:
     def _speak_piper(self, text: str) -> bool:
         if not self.has_piper or not self.player:
             return False
-        if self.piper_voz is not None:
-            return self._speak_piper_en_proceso(text)
-        return self._speak_piper_subproceso(text)
+        if self.piper_voz is not None and self._speak_piper_en_proceso(text):
+            return True
+        return self._speak_piper_subproceso(text) if self.piper_bin else False
 
     def _speak_piper_en_proceso(self, text: str) -> bool:
         """Sintetiza con el modelo ya cargado en memoria (~62 ms por frase)."""
         try:
-            with wave.open(TEMP_WAV_FILE, "wb") as salida:
-                self.piper_voz.synthesize_wav(text, salida)
-        except Exception as e:
-            logger.warning(f"Error sintetizando con Piper en proceso: {e}")
+            with _audio_temporal(".wav") as audio_path:
+                with wave.open(audio_path, "wb") as salida:
+                    self.piper_voz.synthesize_wav(text, salida)
+                return self._play_file(audio_path)
+        except Exception as exc:
+            logger.warning("Error sintetizando con Piper en proceso (%s).", type(exc).__name__)
             return False
-        self._play_file(TEMP_WAV_FILE)
-        return True
 
     def _speak_piper_subproceso(self, text: str) -> bool:
         """Respaldo por binario: recarga el modelo en cada llamada, ~826 ms."""
         try:
-            proc = subprocess.run(
-                [self.piper_bin, "--model", str(self.piper_voz_path), "--output_file", TEMP_WAV_FILE],
-                input=text.encode("utf-8"),
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.PIPE,
-                timeout=30,
-            )
-            if proc.returncode != 0 or not os.path.exists(TEMP_WAV_FILE):
-                stderr = proc.stderr.decode("utf-8", errors="ignore")[:300] if proc.stderr else ""
-                logger.warning(f"Piper falló (code={proc.returncode}): {stderr}")
-                return False
-            self._play_file(TEMP_WAV_FILE)
-            return True
-        except Exception as e:
-            logger.warning(f"Error ejecutando Piper: {e}")
+            with _audio_temporal(".wav") as audio_path:
+                proc = subprocess.run(
+                    [self.piper_bin, "--model", str(self.piper_voz_path), "--output_file", audio_path],
+                    input=text.encode("utf-8"),
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=30,
+                )
+                if proc.returncode != 0 or os.path.getsize(audio_path) == 0:
+                    logger.warning("Piper falló (code=%s).", proc.returncode)
+                    return False
+                return self._play_file(audio_path)
+        except Exception as exc:
+            logger.warning("Error ejecutando Piper (%s).", type(exc).__name__)
             return False
 
     # --- edge-tts (nube, opcional) --------------------------------------
-    async def _generate_edge_audio(self, text: str) -> bool:
+    async def _generate_edge_audio(self, text: str, audio_path: str) -> bool:
         """Genera el audio usando edge-tts y lo guarda en un archivo temporal."""
         try:
-            import edge_tts  # import perezoso: solo si el fallback de nube está habilitado
+            import edge_tts  # import perezoso: solo para texto público con opt-in
             communicate = edge_tts.Communicate(text, EDGE_VOICE)
-            await asyncio.wait_for(communicate.save(TEMP_MP3_FILE), timeout=EDGE_TTS_TIMEOUT_SECONDS)
-            return True
-        except Exception as e:
-            logger.warning(f"Error con edge-tts (¿sin internet o paquete no instalado?): {e}")
+            await asyncio.wait_for(communicate.save(audio_path), timeout=EDGE_TTS_TIMEOUT_SECONDS)
+            return os.path.getsize(audio_path) > 0
+        except Exception as exc:
+            logger.warning("Error con edge-tts (%s).", type(exc).__name__)
             return False
 
     # --- espeak-ng (local, último recurso) -------------------------------
-    def _speak_offline(self, text: str):
+    def _speak_offline(self, text: str) -> bool:
         """Usa espeak-ng directamente como fallback offline."""
         try:
             subprocess.run(
-                ["espeak-ng", "-v", "es-419", "-s", "160", text],
+                ["espeak-ng", "-v", "es-419", "-s", "160", "--stdin"],
+                input=text.encode("utf-8"),
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
                 check=True, timeout=30
             )
-        except Exception as e:
-            logger.error(f"Error con espeak-ng: {e}")
+            return True
+        except Exception as exc:
+            logger.error("Error con espeak-ng (%s).", type(exc).__name__)
+            return False
 
     # --- Reproducción ------------------------------------------------------
-    def _play_file(self, filepath: str):
+    def _play_file(self, filepath: str) -> bool:
         """Reproduce un WAV/MP3 temporal usando mpv o ffplay de forma bloqueante."""
-        if not os.path.exists(filepath) or not self.player:
-            return
-
         try:
+            if not os.path.exists(filepath) or os.path.getsize(filepath) == 0 or not self.player:
+                return False
             if self.player == "mpv":
                 subprocess.run(
                     ["mpv", "--no-video", "--really-quiet", filepath],
@@ -192,35 +211,45 @@ class TextToSpeech:
                     ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", filepath],
                     check=True, timeout=30
                 )
-        except Exception as e:
-            logger.error(f"Error reproduciendo audio: {e}")
-        finally:
-            try:
-                os.remove(filepath)
-            except OSError:
-                pass
+            else:
+                return False
+            return True
+        except Exception as exc:
+            logger.error("Error reproduciendo audio (%s).", type(exc).__name__)
+            return False
 
-    def speak(self, text: str):
+    def speak(self, text: str, *, public: bool = False) -> bool:
         """
-        Método principal para hablar. Si ALLOW_CLOUD_TTS_FALLBACK está
-        habilitado, intenta primero edge-tts (nube, voz de mujer Elena) —
-        solo funciona con internet; si no hay conexión o el flag está
-        apagado, usa Piper (local) y, si tampoco está disponible, espeak-ng
-        (local, último recurso). Bloquea hasta terminar de hablar.
+        Habla en local y devuelve si pudo reproducir la respuesta completa.
+
+        ``public=True`` solo corresponde a frases constantes propias del
+        asistente, nunca a nombres, rutas, notas, transcripciones ni contenido
+        de archivos. Aun así la nube requiere opt-in y fallos de ambos motores
+        locales. El texto privado nunca sale como consecuencia de un fallo.
         """
-        logger.info(f"Niri dice: '{text}'")
+        if not isinstance(text, str) or not text.strip():
+            return False
+        if type(public) is not bool:
+            raise TypeError("public debe ser un booleano explícito")
+        logger.info("Respuesta TTS (%s, %d caracteres).", "pública" if public else "privada", len(text))
 
-        if ALLOW_CLOUD_TTS_FALLBACK and self.player:
-            success = asyncio.run(self._generate_edge_audio(text))
-            if success:
-                self._play_file(TEMP_MP3_FILE)
-                return
+        with self._speak_lock:
+            if self._speak_piper(text):
+                return True
 
-        if self._speak_piper(text):
-            return
+            if self.has_espeak:
+                logger.info("Usando espeak-ng como respaldo offline.")
+                if self._speak_offline(text):
+                    return True
 
-        if self.has_espeak:
-            logger.info("Usando espeak-ng como respaldo offline.")
-            self._speak_offline(text)
-        else:
-            logger.error("No hay motor TTS disponible. Instalá Piper (recomendado) o espeak-ng.")
+            if ALLOW_CLOUD_TTS_FALLBACK and public and self.player:
+                try:
+                    with _audio_temporal(".mp3") as audio_path:
+                        if asyncio.run(self._generate_edge_audio(text, audio_path)):
+                            if self._play_file(audio_path):
+                                return True
+                except Exception as exc:
+                    logger.warning("No pude completar el respaldo de nube (%s).", type(exc).__name__)
+
+            logger.error("No se pudo reproducir la respuesta con los motores permitidos.")
+            return False

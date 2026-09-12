@@ -32,6 +32,10 @@
       "Bash(.venv/bin/python eval/run.py *)",
       "Bash(.venv/bin/python eval/test_seguridad.py)",
       "Bash(.venv/bin/python eval/test_audio.py)",
+      "Bash(.venv/bin/python eval/test_stt.py)",
+      "Bash(.venv/bin/python eval/test_stt.py *)",
+      "Bash(.venv/bin/python eval/analizar_wakeword.py)",
+      "Bash(.venv/bin/python eval/medir_alias.py --solo-analizar)",
       "Bash(.venv/bin/python eval/resumen_metricas.py)",
       "Bash(.venv/bin/python eval/resumen_metricas.py *)",
       "Edit(main.py)",
@@ -50,6 +54,11 @@
       "Edit(eval/run.py)",
       "Edit(eval/resumen_metricas.py)",
       "Edit(eval/test_audio.py)",
+      "Edit(eval/test_stt.py)",
+      "Edit(eval/calidad_audio.py)",
+      "Edit(eval/grabar_wakeword.py)",
+      "Edit(eval/analizar_wakeword.py)",
+      "Edit(eval/medir_alias.py)",
       "Edit(*.md)"
     ],
     "ask": [
