@@ -1,3 +1,4 @@
+import difflib
 import json
 import os
 import unicodedata
@@ -6,6 +7,10 @@ from typing import Optional
 from ollama import Client
 from src.schemas import FileAction
 from src.logger import get_logger
+# src/paths.py es la única fuente de verdad sobre qué raíces existen y qué
+# palabras son relleno al interpretar una ubicación hablada. Se importan en vez
+# de copiarse: una lista duplicada se desincroniza en el primer cambio.
+from src.paths import ROOT_ALIASES, _STOPWORDS
 
 logger = get_logger("NLU")
 
@@ -74,14 +79,144 @@ def _canonizar_encendido(cantidad: Optional[str]) -> Optional[str]:
     return cantidad
 
 
+# Parecido mínimo para dar por buena la recuperación de un segmento de ruta que
+# el modelo deformó. Con 0.75 en SequenceMatcher entran los errores de una o dos
+# letras de la deriva al portugués —"contas"/"cuentas" da 0.92, "imagens"/
+# "imagenes" 0.93— y queda afuera una traducción entera ("work" contra
+# "trabajo" da 0.0), que no es una deformación sino otra palabra.
+_PARECIDO_MINIMO = 0.75
+
+
+def _es_raiz(segmento: str) -> bool:
+    return any(segmento == alias for alias, _ in ROOT_ALIASES)
+
+
+# Marca con la que el usuario introduce una subcarpeta al hablar ("en clases,
+# dentro de la carpeta ada"). Cubre también "adentro de", que la contiene.
+_MARCADOR_SUBCARPETA = "dentro de"
+
+
+def _subcarpeta_dicha(texto_normalizado: str) -> Optional[str]:
+    """
+    Extrae la subcarpeta que el usuario nombró después de "dentro de".
+
+    Devuelve UNA sola palabra a propósito. Tomar todas las posteriores parece
+    más completo y es peor: en "crea, dentro de la carpeta trabajo, un archivo
+    llamado notas.txt" daría "trabajo/un/archivo/llamado/notas.txt". Con una
+    palabra se pierde el segundo término de un nombre compuesto ("sistemas
+    operativos" queda en "sistemas"), que es un error acotado y audible en la
+    confirmación, no una ruta inventada.
+    """
+    posicion = texto_normalizado.find(_MARCADOR_SUBCARPETA)
+    if posicion == -1:
+        return None
+    resto = texto_normalizado[posicion + len(_MARCADOR_SUBCARPETA):]
+    for palabra in resto.split():
+        if palabra in _STOPWORDS or len(palabra) <= 2 or _es_raiz(palabra):
+            continue
+        return palabra
+    return None
+
+
+def _sanear_ruta_base(texto: str, ruta: Optional[str]) -> Optional[str]:
+    """
+    Corrige la ubicación anidada del NLU contrastándola con lo que el usuario dijo.
+
+    Medido el 2026-09-12 sobre 66 órdenes con subcarpeta: el modelo resuelve
+    bien 57. De los 9 fallos, este saneo ataca los tres modos:
+
+    - **Raíz invertida** ("trabajo/proyectos", 4 casos). Es el peligroso, porque
+      no parece un error: `parse_location_speech` encuentra la raíz en la
+      posición 1, se queda sin segmentos posteriores y devuelve ~/Proyectos. La
+      subcarpeta desaparece y el asistente lista —o crea— en la raíz sin que
+      nada lo delate. Se corrige moviendo la raíz al frente, que es determinista
+      y no adivina nada.
+    - **Segmento deformado** ("contas" por "cuentas", "imagens" por "imagenes").
+      La palabra correcta está en la propia orden del usuario, así que se
+      recupera de ahí por parecido.
+    - **Segmento inventado o traducido** ("work" por "trabajo"). No hay de dónde
+      recuperarlo: se descarta. Quedarse con la raíz sola no es acertar, pero es
+      mucho mejor que crear ~/Clases/work en el disco del usuario.
+
+    Dos límites deliberados. Si no hay ninguna raíz reconocible no se toca nada:
+    `parse_location_speech` va a rechazar esa ruta y el flujo va a preguntar la
+    ubicación por voz, que es mejor que lo que pueda inventar esta función. Y no
+    se verifica el segmento de la raíz contra el texto —solo los posteriores—
+    porque el usuario la nombra de formas que no son subcadena exacta ("en clase
+    de ada"), y descartarla por eso rompería órdenes que hoy andan.
+
+    No toca 'destino': en la misma medición salió 22/22.
+    """
+    if not ruta:
+        return ruta
+
+    segmentos = [s for s in (_normalizar(p).strip() for p in ruta.split("/")) if s]
+    indice_raiz = next((i for i, s in enumerate(segmentos) if _es_raiz(s)), None)
+    if indice_raiz is None:
+        return ruta
+
+    if indice_raiz != 0:
+        logger.warning(
+            f"Ruta invertida del NLU: {ruta!r} pone la raíz "
+            f"'{segmentos[indice_raiz]}' después de la subcarpeta. Se reordena; "
+            "sin esto la subcarpeta se perdía y la acción caía en la raíz."
+        )
+        segmentos.insert(0, segmentos.pop(indice_raiz))
+
+    texto_normalizado = _normalizar(texto).replace(",", " ")
+    # Candidatos para recuperar un segmento deformado: las palabras de la orden
+    # que podrían ser un nombre de carpeta. Se descartan el relleno y las de una
+    # o dos letras, que darían parecidos altos por casualidad.
+    candidatas = [p for p in texto_normalizado.split()
+                  if p not in _STOPWORDS and len(p) > 2 and not _es_raiz(p)]
+
+    saneados = [segmentos[0]]
+    for segmento in segmentos[1:]:
+        if segmento in texto_normalizado:
+            saneados.append(segmento)
+            continue
+        parecidas = difflib.get_close_matches(
+            segmento, candidatas, n=1, cutoff=_PARECIDO_MINIMO
+        )
+        if parecidas:
+            logger.warning(
+                f"El NLU deformó un nombre de carpeta: devolvió '{segmento}', que el "
+                f"usuario no dijo. Se usa '{parecidas[0]}', que sí está en la orden."
+            )
+            saneados.append(parecidas[0])
+        else:
+            logger.warning(
+                f"El NLU inventó el segmento '{segmento}' en {ruta!r}: no aparece en la "
+                "orden ni se parece a nada de ella. Se descarta y queda solo la raíz."
+            )
+
+    # Último caso: quedó la raíz sola, pero el usuario sí nombró una subcarpeta.
+    # Pasa cuando el modelo la omite de entrada ("proyectos" a secas) y cuando la
+    # tradujo y el paso anterior la descartó ("clases/work" -> "clases"). Es la
+    # única rama que lee la orden en vez de corregir lo que devolvió el modelo,
+    # y por eso se limita a la marca "dentro de": sin ella no hay forma de
+    # distinguir una subcarpeta del nombre de lo que se está creando.
+    if len(saneados) == 1:
+        recuperada = _subcarpeta_dicha(texto_normalizado)
+        if recuperada:
+            logger.warning(
+                f"El NLU devolvió {ruta!r} sin la subcarpeta que el usuario nombró. "
+                f"Se recupera '{recuperada}' de la propia orden."
+            )
+            saneados.append(recuperada)
+
+    return "/".join(saneados)
+
+
 def corregir_intencion(texto: str, action: FileAction) -> FileAction:
     """
     Corrige errores de clasificación conocidos y verificados del modelo.
 
     Solo actúa sobre casos donde la acción equivocada tiene consecuencias reales
-    y la regla es inequívoca: hoy, que nombrar el wifi o el bluetooth descarta
-    'energia'. No es un router genérico ni adivina intenciones; ante cualquier
-    otra cosa devuelve la acción tal como vino.
+    y la regla es inequívoca: que nombrar el wifi o el bluetooth descarta
+    'energia', y que en una ubicación anidada la raíz va primero (ver
+    `_sanear_ruta_base`). No es un router genérico ni adivina intenciones; ante
+    cualquier otra cosa devuelve la acción tal como vino.
     """
     if action.action == "energia":
         normalizado = _normalizar(texto)
@@ -108,6 +243,10 @@ def corregir_intencion(texto: str, action: FileAction) -> FileAction:
                 canonica = desde_texto
         if canonica != action.cantidad:
             action = action.model_copy(update={"cantidad": canonica})
+
+    saneada = _sanear_ruta_base(texto, action.ruta_base)
+    if saneada != action.ruta_base:
+        action = action.model_copy(update={"ruta_base": saneada})
 
     return action
 

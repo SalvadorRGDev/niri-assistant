@@ -311,18 +311,19 @@ Una tarea no está terminada hasta que, **en este orden**:
 <!-- Trampas del entorno que cambian cómo trabajar. Los hallazgos técnicos del
      producto viven en README.md > Decisiones técnicas, no acá. -->
 
-- **2026-09-11 — El NLU devuelve la subcarpeta como ruta con barras** (`'clases/ada'`) y
-  **copia literal los ejemplos del prompt**: la misma regla probada con la palabra del
-  ejemplo ("ada") daba 5/5, y con otra ("matematica") devolvía `'matematica/ clases/parciales'`
-  —raíz invertida y el `nombre` metido en la ruta—, que resuelve a una carpeta equivocada
-  en silencio. Probar siempre con palabras que NO estén en el prompt, y que el caso del
-  banco fije `ruta_base`: si solo fija la acción, el banco da verde con la ruta rota.
+- **2026-09-12 — Prompt del NLU: probar fuera de sus ejemplos, y sanear la salida antes
+  que instruir.** Acierta el 100% con las palabras que están en los ejemplos ("ada",
+  "borradores") y se descarrila con las demás, así que una prueba escrita con el
+  vocabulario del prompt da verde sobre un bug real; y el caso del banco tiene que fijar
+  `ruta_base`, no solo la acción. Agregar una prohibición **empeoró** el acierto (64→63
+  de 66) y costó `num_ctx`; sanear la salida en `corregir_intencion` lo subió de 57 a 66.
+  Los cuatro modos de falla medidos están en `README.md`.
 - **2026-09-05 — Antes de medir una mejora, fijar el conjunto.** El STT y el NLU no son
   deterministas y `recordings/` crece solo; una muestra chica ya dio dos conclusiones
-  falsas. Usar `eval/run.py` y `eval/test_stt.py`.
-- **2026-09-05 — En el NLU el costo está en la salida (~15 ms por token) y si el prompt no
-  entra en `num_ctx` Ollama lo trunca **sin error visible** (`src/nlu.py` avisa bajo el 25%).
-  Comparar modelos exige liberar la VRAM (`ollama ps`), si no el segundo corre en CPU.
+  falsas. Usar `eval/run.py` y `eval/test_stt.py`. En el NLU el costo está en la salida
+  (~15 ms por token), y si el prompt no entra en `num_ctx` Ollama lo trunca **sin error
+  visible** (`src/nlu.py` avisa bajo el 25%). Comparar modelos exige liberar la VRAM
+  (`ollama ps`), si no el segundo corre en CPU.
 - **2026-09-05 — Sin el micrófono USB no hay fuente y el `default` no abre.** Sondear ALSA
   abriendo dispositivos segfaultea PortAudio, y un `start()` fallido agota journald.
 - **2026-09-04 — `ollama.service` no arranca solo y su ausencia no da error visible:**
@@ -337,21 +338,19 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 <!-- AAAA-MM-DD — qué cambió — archivos — cómo se verificó. Máx. ~20 líneas. -->
 
-- **2026-09-11 — Las ubicaciones anidadas ya resuelven, punta a punta.**
-  `parse_location_speech` separaba solo por espacios, así que `'clases/ada'` era una
-  palabra sola y el asistente volvía a preguntar la ubicación ya dicha; ahora hay modo
-  ruta, que separa por "/" y toma solo los segmentos POSTERIORES a la raíz (con los
-  previos, `/home/usuario/clases/ada` inventaría subcarpetas). Y el prompt del NLU, que
-  con `listar` devolvía `'ada'` sin la raíz, ahora exige la ruta completa, con la raíz
-  primero y sin el `nombre` adentro (+224 tokens de prompt; queda 29% de `num_ctx`). Archivos: `src/paths.py`, `src/nlu.py`,
-  `eval/test_integracion.py` (+3 casos). Verificado: banco **69/69 sin regresiones**
-  (p50 326 ms), integración 22/22, seguridad 46/46, y "crea/lista … en clases, dentro
-  de la carpeta ada" resuelve 5/5 a `~/Clases/ADA`. El banco quedó en **70/70**: se fijó
-  `ruta_base` en `arch_crear_anidada` (fijaba solo la acción, por eso daba verde con la
-  ruta rota) y se sumó `arch_listar_anidada`. Conocido: "carpeta trabajo" a veces sale
-  traducido como `proyectos/work` (1 de 8 frases); la confirmación hablada lo delata.
+- **2026-09-12 — La ruta anidada del NLU se sanea contra lo que el usuario dijo.** Cierra
+  el pendiente de `proyectos/work`, que eran cuatro bugs y no uno: de 66 órdenes con
+  subcarpeta el modelo acertaba 57. `_sanear_ruta_base` (`src/nlu.py`) reordena la raíz al
+  frente, recupera el segmento deformado desde la propia orden, descarta el inventado y
+  completa la subcarpeta que sigue a "dentro de"; sin raíz reconocible no toca nada y deja
+  que el flujo pregunte por voz. Archivos: `src/nlu.py`, `eval/test_integracion.py` (+6).
+  Verificado: **66/66** rutas (era 57/66), banco **70/70 sin regresiones** (p50 325 ms),
+  seguridad 46/46, integración 28/28, audio 27/27 y `test_pipeline.py` punta a punta.
+- **2026-09-11 — Las ubicaciones anidadas resuelven punta a punta.** El NLU devuelve
+  `'clases/ada'` y `parse_location_speech` separaba solo por espacios, así que el asistente
+  volvía a preguntar la ubicación ya dicha; el modo ruta separa por "/" y toma solo los
+  segmentos POSTERIORES a la raíz. Archivos: `src/paths.py`, `src/nlu.py`. Banco 70/70.
 - **Hasta el 2026-09-08.** Veredicto del wake word (reentrenar: AUC 0.307) y antialias del
   remuestreo; fases 0 a 3 de optimización (banco, `src/router.py`, Piper en proceso: p50 de
   662 a ~320 ms); rutas reales, git con licencia MIT y harness v2. Detalle en `README.md` y
-  `git log`. El repo en GitHub ya existe (`origin`); al 2026-09-11 `main` quedó 2
-  commits adelante de `origin/main`, sin pushear.
+  `git log`.

@@ -52,8 +52,28 @@ que permite crearla.
 Si no se dice ninguna ubicación, el asistente la pregunta, y **esa respuesta no pasa por
 el LLM**: la interpreta directamente `src/paths.py`. Antes de crear algo repite en voz
 alta la ruta final —«Voy a crear 'parciales' en Clases, carpeta ADA»—, así que conviene
-escucharla: el NLU a veces traduce un nombre («trabajo» → `work`, en 1 de 8 frases
-probadas) y esa carpeta no existiría.
+escucharla.
+
+**El modelo se equivoca en la subcarpeta, y por eso la salida se sanea.** Medido el
+2026-09-12 sobre 66 órdenes con ubicación anidada: `qwen2.5:3b` acertaba 57. Falla de
+cuatro formas, todas con palabras que **no** están en los ejemplos del prompt (con las
+que sí están acierta el 100%):
+
+| Modo de falla | Ejemplo | Sin saneo resolvía a |
+|---|---|---|
+| Invierte la raíz | «carpeta trabajo en proyectos» → `trabajo/proyectos` | `~/Proyectos` — la subcarpeta desaparece |
+| Deforma el nombre (se desliza al portugués) | `cuentas` → `contas`, `asistente` → `assistent` | `~/Clases/contas`, inexistente |
+| Lo traduce al inglés | `trabajo` → `work` | `~/Clases/work`, que en `crear` se crearía |
+| Omite la subcarpeta | `proyectos/documentos` → `proyectos` | la raíz |
+
+La inversión era la peligrosa: `parse_location_speech` encuentra la raíz en la segunda
+posición, se queda sin segmentos posteriores y devuelve la raíz pelada, así que la acción
+se ejecuta un nivel más arriba **sin que nada lo delate**. `_sanear_ruta_base`
+(`src/nlu.py`) corrige los cuatro contra el texto que dijo el usuario —reordena, recupera
+por parecido, descarta lo inventado y toma la subcarpeta que sigue a «dentro de»— y deja
+las 66 en 66. Nunca inventa: si no reconoce una raíz no toca nada y el asistente pregunta
+la ubicación por voz. Reforzar el prompt en vez de sanear se probó y **empeoró** el
+resultado (64 → 63), porque el modelo pasó de invertir la ruta a omitirla.
 
 ## Arquitectura
 

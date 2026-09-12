@@ -26,7 +26,7 @@ if _sounddevice_original is None:
     del sys.modules["sounddevice"]
 else:
     sys.modules["sounddevice"] = _sounddevice_original
-from src import audit as audit_mod, executor as executor_mod, paths as paths_mod
+from src import audit as audit_mod, executor as executor_mod, nlu as nlu_mod, paths as paths_mod
 from src.actions.dispatch import _HANDLERS
 from src.confirm import interpret_confirmation
 from src.schemas import FileAction
@@ -155,6 +155,73 @@ class Contratos(unittest.TestCase):
             FileAction(action="crear_carpeta", nombre="parciales", ruta_base="clases/ada"), "prueba")
         self.assertTrue((self.clases / "ADA" / "parciales").is_dir())
         self.assertFalse((self.clases / "parciales").exists())
+
+    def test_ruta_invertida_del_nlu_se_reordena(self):
+        """El modelo devuelve la raíz DESPUÉS de la subcarpeta ('trabajo/proyectos')
+        en 4 de 66 órdenes con subcarpeta (medido el 2026-09-12). Es el modo de falla
+        peligroso: parse_location_speech encuentra la raíz en la posición 1, se queda
+        sin segmentos posteriores y devuelve la raíz pelada, así que la subcarpeta
+        desaparece y la acción se ejecuta un nivel más arriba sin que nada lo delate."""
+        for crudo, esperado in (("trabajo/proyectos", "proyectos/trabajo"),
+                                ("documentos/proyectos", "proyectos/documentos"),
+                                ("escuela/proyectos", "proyectos/escuela"),
+                                ("ada/clases", "clases/ada")):
+            with self.subTest(crudo=crudo):
+                texto = f"mostrame los archivos de {esperado.replace('/', ', dentro de la carpeta ')}"
+                self.assertEqual(nlu_mod._sanear_ruta_base(texto, crudo), esperado)
+
+    def test_nombre_de_carpeta_deformado_se_recupera_de_la_orden(self):
+        """qwen2.5:3b se desliza al portugués en nombres que no están en los ejemplos
+        del prompt: 'cuentas' -> 'contas', 'imagenes' -> 'imagens'. La palabra correcta
+        está en la orden del usuario, así que se recupera de ahí por parecido."""
+        self.assertEqual(
+            nlu_mod._sanear_ruta_base("lista lo que hay en clases, dentro de la carpeta cuentas",
+                                      "clases/contas"), "clases/cuentas")
+        self.assertEqual(
+            nlu_mod._sanear_ruta_base("mostrame los archivos de proyectos, dentro de la carpeta imagenes",
+                                      "proyectos/imagens"), "proyectos/imagenes")
+
+    def test_subcarpeta_traducida_u_omitida_se_toma_de_la_orden(self):
+        """Dos fallos distintos del modelo con el mismo arreglo: traducir la carpeta
+        ('trabajo' -> 'work') y omitirla directamente. En los dos casos el usuario sí
+        la dijo, y sin esto el asistente crea ~/Clases/work o trabaja en la raíz."""
+        texto = "lista lo que hay en clases, dentro de la carpeta trabajo"
+        self.assertEqual(nlu_mod._sanear_ruta_base(texto, "clases/work"), "clases/trabajo")
+        self.assertEqual(nlu_mod._sanear_ruta_base(texto, "clases"), "clases/trabajo")
+
+    def test_saneo_no_inventa_una_subcarpeta_que_nadie_dijo(self):
+        """La contracara: el saneo solo corrige lo que la orden respalda. Si el usuario
+        no nombró subcarpeta, la ruta tiene que quedar intacta —inventarla sería el
+        mismo error que se está corrigiendo, pero con la firma del código."""
+        intactas = {
+            ("crea una carpeta llamada tareas en clases", "clases"): "clases",
+            ("lista lo que hay dentro de proyectos", "proyectos"): "proyectos",
+            ("mové el archivo cv.pdf de proyectos a la carpeta trabajo", "proyectos"): "proyectos",
+            ("borrame el archivo viejo.zip", ""): "",
+            # Sin raíz reconocible no se toca nada: paths.py la rechaza y el flujo
+            # pregunta la ubicación, que es mejor que cualquier cosa que se invente acá.
+            ("lista lo que hay en la carpeta fotos", "fotos"): "fotos",
+        }
+        for (texto, crudo), esperado in intactas.items():
+            with self.subTest(crudo=crudo):
+                self.assertEqual(nlu_mod._sanear_ruta_base(texto, crudo), esperado)
+
+    def test_saneo_toma_una_sola_palabra_tras_dentro_de(self):
+        """Si la orden sigue después de nombrar la subcarpeta, solo la primera palabra
+        es parte de la ruta. Tomar todas daría 'trabajo/un/archivo/llamado/notas.txt'."""
+        self.assertEqual(
+            nlu_mod._sanear_ruta_base(
+                "crea, dentro de la carpeta trabajo, un archivo llamado notas.txt en proyectos",
+                "proyectos"), "proyectos/trabajo")
+
+    def test_saneo_llega_hasta_la_ruta_resuelta(self):
+        """Punta a punta: la corrección tiene que sobrevivir a corregir_intencion y
+        terminar en la carpeta real, no solo arreglar la cadena."""
+        (self.clases / "ADA").mkdir()
+        accion = nlu_mod.corregir_intencion(
+            "lista lo que hay en clases, dentro de la carpeta ada",
+            FileAction(action="listar", ruta_base="ada/clases"))
+        self.assertEqual(paths_mod.parse_location_speech(accion.ruta_base), self.clases / "ADA")
 
     def test_confirmaciones_condicionales_no_autorizan(self):
         for text in ("sí pero espera", "por si acaso", "dale mañana", "correcto pero después", "quizás sí"):
