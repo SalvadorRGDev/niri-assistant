@@ -353,4 +353,5 @@ Una tarea no está terminada hasta que, **en este orden**:
 - **Hasta el 2026-09-08.** Veredicto del wake word (reentrenar: AUC 0.307) y antialias del
   remuestreo; fases 0 a 3 de optimización (banco, `src/router.py`, Piper en proceso: p50 de
   662 a ~320 ms); rutas reales, git con licencia MIT y harness v2. Detalle en `README.md` y
-  `git log`. Pendiente manual: crear el repo en GitHub y pushear.
+  `git log`. El repo en GitHub ya existe (`origin`); al 2026-09-11 `main` quedó 2
+  commits adelante de `origin/main`, sin pushear.
