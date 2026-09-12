@@ -67,6 +67,25 @@ def _real_child_name(parent: Path, spoken: str) -> str:
     return spoken
 
 
+def _subpath(root: Path, parts: List[str]) -> Optional[Path]:
+    """
+    Arma `root/parts...` traduciendo cada segmento al nombre real en disco.
+    Devuelve None si algún segmento intenta salirse de la raíz.
+
+    El chequeo de "/" ya no puede dispararse desde parse_location_speech (que
+    separa por barras antes de llamar acá), pero se mantiene: es la última
+    defensa si alguien vuelve a llamar a esta función con texto crudo.
+    """
+    if not parts:
+        return root
+    if any("/" in part or "\\" in part or part in (".", "..") for part in parts):
+        return None
+    path = root
+    for part in parts:
+        path = path / _real_child_name(path, part)
+    return path
+
+
 def parse_location_speech(text: Optional[str]) -> Optional[Path]:
     """
     Interpreta una frase (respuesta hablada, o el campo `ruta_base`/`destino`
@@ -77,6 +96,8 @@ def parse_location_speech(text: Optional[str]) -> Optional[Path]:
       "proyectos"                         -> ~/Proyectos
       "en Clases"                         -> ~/Clases
       "Proyectos, carpeta trabajo"        -> ~/Proyectos/trabajo
+      "clases/ada"  (ruta del NLU)        -> ~/Clases/ADA
+      "clases/../etc"                     -> None (segmento inseguro)
       "la carpeta fotos" (sin raíz)       -> None (ambiguo, hay que preguntar)
       ""  /  None                         -> None
 
@@ -87,24 +108,34 @@ def parse_location_speech(text: Optional[str]) -> Optional[Path]:
     """
     if not text:
         return None
+
+    # Modo ruta. El NLU devuelve la ubicación anidada como una ruta con barras
+    # ("clases/ada", y a veces con prefijo: "~/clases/ada"), y sin esto ninguna
+    # raíz coincidía: "clases/ada" era UNA sola palabra, así que el asistente
+    # volvía a preguntar la ubicación aunque la hubieras dicho. Medido con
+    # qwen2.5:3b el 2026-09-11 sobre "crea una carpeta llamada parciales en
+    # clases, dentro de la carpeta ada".
+    #
+    # Acá el orden SÍ importa: solo cuentan los segmentos posteriores a la raíz.
+    # Si se aceptaran los anteriores, "/home/usuario/clases/ada" se convertiría
+    # en ~/Clases/home/usuario/ada, es decir subcarpetas inventadas en silencio.
+    if "/" in text:
+        segments = [s for s in (_normalize(s) for s in text.split("/")) if s.strip()]
+        for alias, root in ROOT_ALIASES:
+            if alias in segments:
+                posteriores = segments[segments.index(alias) + 1:]
+                return _subpath(root, [w for seg in posteriores
+                                       for w in seg.split() if w not in _STOPWORDS])
+        return None
+
+    # Modo frase hablada. Acá la raíz puede aparecer al final ("dentro de la
+    # carpeta trabajo en proyectos"), así que vale en cualquier posición.
     words = _normalize(text).split()
     if not words:
         return None
-
     for alias, root in ROOT_ALIASES:
         if alias in words:
-            remainder = [w for w in words if w != alias and w not in _STOPWORDS]
-            if not remainder:
-                return root
-            # Ningún segmento hablado puede contener separadores ni ser "."/"..".
-            # El ejecutor igual lo rechazaría con is_safe_path(), pero no tiene
-            # sentido construir una ruta de escape para que la validen abajo.
-            if any("/" in w or "\\" in w or w in (".", "..") for w in remainder):
-                return None
-            path = root
-            for part in remainder:
-                path = path / _real_child_name(path, part)
-            return path
+            return _subpath(root, [w for w in words if w != alias and w not in _STOPWORDS])
     return None
 
 

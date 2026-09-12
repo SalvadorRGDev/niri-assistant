@@ -61,27 +61,37 @@ como se escribe. Con rutas absolutas quedaban atadas a una máquina; escritas as
 funcionan en cualquier clon. Corolario: hay que invocarlas desde la raíz del
 proyecto, sin `cd` previo.
 
-```bash
-PY=.venv/bin/python
+Por el mismo motivo se escribe `.venv/bin/python` completo en cada línea, sin la
+variable `PY=...` que usaba esta sección antes: **la shell del usuario es fish**, y
+ahí `PY=.venv/bin/python` no es una asignación sino un error (`Uso no soportado de
+'='`), así que ningún comando copiado de acá le corría. La ruta completa funciona
+igual en bash y en fish, y además es la forma exacta que matchean las reglas de
+`allow`.
 
+```bash
 # Dependencias
-$PY -m pip install -r requirements.txt
+.venv/bin/python -m pip install -r requirements.txt
 
 # Ejecutar el asistente a mano (ver aviso de micrófono abajo)
-$PY main.py
+.venv/bin/python main.py
 
 # Prueba end-to-end sin micrófono (NLU + ejecutor + TTS por texto)
-$PY test_pipeline.py "Crea una carpeta llamada pruebas_nlu"
+.venv/bin/python test_pipeline.py "Crea una carpeta llamada pruebas_nlu"
 
 # Pruebas de audio (requieren el micrófono libre, ver aviso abajo)
-$PY test_phase1.py      # consumo de CPU en IDLE
-$PY test_mic_vad.py     # captura + VAD
+.venv/bin/python test_phase1.py   # consumo de CPU en IDLE
+.venv/bin/python test_mic_vad.py  # captura + VAD
+.venv/bin/python eval/grabar_wakeword.py  # positivos del wake word
+.venv/bin/python eval/medir_alias.py      # captura cruda a 48 kHz para medir el alias
 
 # Verificación de §7 — ninguna de estas toca el micrófono ni la red
-$PY eval/run.py                # banco de 66 órdenes contra el baseline; sale 1 si hay regresiones
-$PY eval/test_seguridad.py     # 46 checks de los invariantes de §4
-$PY eval/test_audio.py         # 22 checks de la selección de dispositivo de entrada
-$PY eval/resumen_metricas.py   # p50/p95 por etapa sobre logs/metrics.jsonl
+.venv/bin/python eval/run.py              # banco de 69 órdenes contra el baseline; sale 1 si hay regresiones
+.venv/bin/python eval/test_seguridad.py   # 46 checks de los invariantes de §4
+.venv/bin/python eval/test_audio.py       # 27 checks: selección de dispositivo y antialias del remuestreo
+.venv/bin/python eval/test_stt.py         # regresión del STT sobre las grabaciones reales
+.venv/bin/python eval/resumen_metricas.py # p50/p95 por etapa sobre logs/metrics.jsonl
+.venv/bin/python eval/analizar_wakeword.py # puntajes del wake word: positivos vs falsos disparos
+.venv/bin/python eval/medir_alias.py --solo-analizar # relee las capturas de 48 kHz ya grabadas
 
 # Servicio
 systemctl --user status|stop|start|restart niri.service
@@ -283,8 +293,8 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 1. El código nuevo se ejecutó realmente al menos una vez por el camino que modificaste.
 2. Corriste la verificación aplicable:
-   - Cambios en NLU / ejecutor / TTS / rutas → `$PY test_pipeline.py "<orden real>"`.
-   - Cambios en audio / VAD / wake word → `$PY test_mic_vad.py` o `$PY test_phase1.py`,
+   - Cambios en NLU / ejecutor / TTS / rutas → `.venv/bin/python test_pipeline.py "<orden real>"`.
+   - Cambios en audio / VAD / wake word → `.venv/bin/python test_mic_vad.py` o `.venv/bin/python test_phase1.py`,
      con `niri.service` detenido (§2).
    - Cambios que solo tocan documentación → releer el archivo editado completo.
 3. Si el cambio afecta al servicio, `systemctl --user restart niri.service` y
@@ -301,28 +311,25 @@ Una tarea no está terminada hasta que, **en este orden**:
 <!-- Trampas del entorno que cambian cómo trabajar. Los hallazgos técnicos del
      producto viven en README.md > Decisiones técnicas, no acá. -->
 
-- **2026-09-05 — Antes de medir una mejora, medir el piso de ruido y fijar el
-  conjunto.** El STT y el NLU no son deterministas, y `recordings/` crece solo
-  (hoy, sobre todo con falsos positivos). Una muestra chica dio dos conclusiones
-  falsas seguidas. Usar `eval/run.py` y `eval/test_stt.py`, que fijan el conjunto.
-- **2026-09-05 — En el NLU el costo está en la salida, y la ventana se llena en
-  silencio.** El prefill cacheado es casi gratis (0.05 s) y cada token generado
-  cuesta ~15 ms. Si el prompt no entra en `num_ctx`, Ollama lo trunca por el
-  principio **sin ningún error visible**; `src/nlu.py` avisa si el margen baja del 25%.
-- **2026-09-05 — Comparar modelos exige liberar la VRAM.** Con otro modelo cargado,
-  Ollama corre el segundo en CPU y la medición miente. Verificar `ollama ps`.
-- **2026-09-05 — El micrófono no es fijo y el wake word está atado al que se entrenó.**
-  Sin el USB, PipeWire se queda sin fuentes y el `default` no abre. Con el interno
-  hubo 14 falsos positivos en dos horas con scores de hasta 0.986: ni el umbral ni
-  `AUDIO_GAIN` lo arreglan. Sondear dispositivos ALSA abriéndolos hace segfaultear a
-  PortAudio, y un `start()` fallido escribe ~10.000 líneas al fd 2 desde C, que es el
-  `RateLimitBurst` de journald: sin silenciar ese descriptor, systemd descarta todos
-  los logs del servicio.
-- **2026-09-04 — `ollama.service` no arranca solo, y su ausencia no da error visible.**
-  Con Ollama apagado el NLU devuelve `action='ninguna'` y parece un problema de
-  comprensión. Verificar `systemctl is-active ollama`; levantarlo requiere `sudo` (§3.1.1).
-- **2026-09-04 — No hay `npm`, `black` ni `pytest`**, y Python es **3.14** (sin wheels
-  de `tflite-runtime` ni TensorFlow, de ahí `onnxruntime` para el wake word).
+- **2026-09-11 — El NLU devuelve la subcarpeta como ruta con barras** (`'clases/ada'`) y
+  **copia literal los ejemplos del prompt**: la misma regla probada con la palabra del
+  ejemplo ("ada") daba 5/5, y con otra ("matematica") devolvía `'matematica/ clases/parciales'`
+  —raíz invertida y el `nombre` metido en la ruta—, que resuelve a una carpeta equivocada
+  en silencio. Probar siempre con palabras que NO estén en el prompt, y que el caso del
+  banco fije `ruta_base`: si solo fija la acción, el banco da verde con la ruta rota.
+- **2026-09-05 — Antes de medir una mejora, fijar el conjunto.** El STT y el NLU no son
+  deterministas y `recordings/` crece solo; una muestra chica ya dio dos conclusiones
+  falsas. Usar `eval/run.py` y `eval/test_stt.py`.
+- **2026-09-05 — En el NLU el costo está en la salida (~15 ms por token) y si el prompt no
+  entra en `num_ctx` Ollama lo trunca **sin error visible** (`src/nlu.py` avisa bajo el 25%).
+  Comparar modelos exige liberar la VRAM (`ollama ps`), si no el segundo corre en CPU.
+- **2026-09-05 — Sin el micrófono USB no hay fuente y el `default` no abre.** Sondear ALSA
+  abriendo dispositivos segfaultea PortAudio, y un `start()` fallido agota journald.
+- **2026-09-04 — `ollama.service` no arranca solo y su ausencia no da error visible:**
+  el NLU devuelve `action='ninguna'` y parece falta de comprensión. Verificar
+  `systemctl is-active ollama`; levantarlo requiere `sudo` (§3.1.1).
+- **2026-09-04 — No hay `npm`, `black` ni `pytest`**, y Python es **3.14** (sin wheels de
+  `tflite-runtime` ni TensorFlow, de ahí `onnxruntime` para el wake word).
 - **2026-09-03 — Micrófono de acceso exclusivo, `AUDIO_GAIN` solo para el VAD y
   `CPUQuota` bajo rompiendo el VAD:** los tres están en `README.md`.
 
@@ -330,29 +337,20 @@ Una tarea no está terminada hasta que, **en este orden**:
 
 <!-- AAAA-MM-DD — qué cambió — archivos — cómo se verificó. Máx. ~20 líneas. -->
 
-- **2026-09-05 — Fases 0, 1 y 2 del plan de optimización.** F0: banco de evaluación
-  (`eval/casos.jsonl`, 69 casos), `eval/run.py`, suites de seguridad y audio,
-  `src/metrics.py`. F1: `src/router.py` resuelve 22/69 órdenes sin LLM con 0 errores,
-  `cpu_threads=8` en el STT y precalentado del NLU. F2: Piper en proceso (62 ms) y
-  búsqueda híbrida local (`src/embeddings.py`, `src/indice.py`, acción `buscar`).
-  En el camino, el banco destapó que "apagá el bluetooth" llegaba a `systemctl
-  poweroff` sin confirmar: arreglado en capas (corrección determinista en el NLU,
-  confirmación por voz para `energia`, auditoría de las acciones no-archivo).
-  **69/69 acción+slots, p50 de 662 a ~320 ms.** El detalle de cada cambio está en los
-  mensajes de commit; verificado con las tres suites, `test_pipeline.py` y el servicio.
-- **2026-09-05 — Fase 3: experimentos medidos, ninguno adoptado.** `eval/test_stt.py`
-  (banco de regresión del STT sobre 87 grabaciones, guarda **hashes y no
-  transcripciones**, con tolerancia del 5% por el piso de ruido) y `eval/run.py
-  --modelo` para comparar modelos sin tocar producción. Resultados: el **1.5B** da
-  65/69 contra 69/69, ahorra 969 MiB de VRAM y es 39% más rápido — se documenta como
-  opción, no se adopta, porque falla los dos casos de "fuera de alcance" inventando
-  una acción en vez de decir `ninguna`. La **decodificación especulativa** se descarta
-  con números: el techo son ~100 ms sobre el 68% de órdenes que no atrapa el router,
-  a cambio de migrar de Ollama a llama-server y meter un segundo modelo en 4 GB.
-  Además, `src/main_loop.py` guarda ahora los 2 s previos a cada falso positivo del
-  wake word en `recordings/falsos_positivos/`: sin ese audio no hay con qué
-  reentrenarlo, y las métricas dicen que 36 de 37 disparos no produjeron ninguna orden.
-- **Anterior a 2026-09-05:** fix de nombres reales de carpeta en `src/paths.py`,
-  consolidación de la documentación en `README.md`, git con licencia MIT y harness v2
-  con `.claude/settings.json`. Está en `git log` (§6.7).
-  Pendiente manual: crear el repo en GitHub y hacer `push`.
+- **2026-09-11 — Las ubicaciones anidadas ya resuelven, punta a punta.**
+  `parse_location_speech` separaba solo por espacios, así que `'clases/ada'` era una
+  palabra sola y el asistente volvía a preguntar la ubicación ya dicha; ahora hay modo
+  ruta, que separa por "/" y toma solo los segmentos POSTERIORES a la raíz (con los
+  previos, `/home/usuario/clases/ada` inventaría subcarpetas). Y el prompt del NLU, que
+  con `listar` devolvía `'ada'` sin la raíz, ahora exige la ruta completa, con la raíz
+  primero y sin el `nombre` adentro (+224 tokens de prompt; queda 29% de `num_ctx`). Archivos: `src/paths.py`, `src/nlu.py`,
+  `eval/test_integracion.py` (+3 casos). Verificado: banco **69/69 sin regresiones**
+  (p50 326 ms), integración 22/22, seguridad 46/46, y "crea/lista … en clases, dentro
+  de la carpeta ada" resuelve 5/5 a `~/Clases/ADA`. El banco quedó en **70/70**: se fijó
+  `ruta_base` en `arch_crear_anidada` (fijaba solo la acción, por eso daba verde con la
+  ruta rota) y se sumó `arch_listar_anidada`. Conocido: "carpeta trabajo" a veces sale
+  traducido como `proyectos/work` (1 de 8 frases); la confirmación hablada lo delata.
+- **Hasta el 2026-09-08.** Veredicto del wake word (reentrenar: AUC 0.307) y antialias del
+  remuestreo; fases 0 a 3 de optimización (banco, `src/router.py`, Piper en proceso: p50 de
+  662 a ~320 ms); rutas reales, git con licencia MIT y harness v2. Detalle en `README.md` y
+  `git log`. Pendiente manual: crear el repo en GitHub y pushear.

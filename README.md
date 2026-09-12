@@ -30,6 +30,31 @@ Las acciones de archivos van al `Executor` (tienen modelo de rutas y confirmaci�
 resto se rutea por `src/actions/dispatch.py`, que existe justamente para no mezclar
 los dos modelos de seguridad.
 
+### Cómo se nombra una ubicación por voz
+
+Las acciones de archivos ocurren siempre bajo una de las dos raíces de la whitelist,
+`~/Proyectos` o `~/Clases` (ver *Modelo de seguridad*). Cualquier otra carpeta del home
+—`~/Descargas`, `~/Documentos`— no resuelve **a propósito**: el asistente vuelve a
+preguntar en vez de escribir fuera de la frontera.
+
+Para llegar a una **subcarpeta** alcanza con nombrarla junto a la raíz. Estas tres formas
+resuelven a `~/Clases/ADA`, las tres verificadas de punta a punta:
+
+> «…en Clases, dentro de la carpeta ADA» · «…de Proyectos, carpeta trabajo» ·
+> «…en la carpeta ADA de Clases»
+
+La raíz tiene que aparecer: decir sólo «ADA» no alcanza, porque el asistente no sabe de
+qué carpeta parte. El resolvedor admite varios niveles (`Clases, carpeta ADA, carpeta
+parciales` → `~/Clases/ADA/parciales`) y corrige el nombre contra el disco: «ada» resuelve
+a `ADA` si esa carpeta ya existe, y se conserva tal cual si todavía no existe, que es lo
+que permite crearla.
+
+Si no se dice ninguna ubicación, el asistente la pregunta, y **esa respuesta no pasa por
+el LLM**: la interpreta directamente `src/paths.py`. Antes de crear algo repite en voz
+alta la ruta final —«Voy a crear 'parciales' en Clases, carpeta ADA»—, así que conviene
+escucharla: el NLU a veces traduce un nombre («trabajo» → `work`, en 1 de 8 frases
+probadas) y esa carpeta no existiría.
+
 ## Arquitectura
 
 ```
@@ -302,24 +327,25 @@ cuando el equipo está bajo carga pero no estrangula el pipeline en tiempo real.
 
 ## Desarrollo y pruebas
 
-```bash
-PY=.venv/bin/python
+Los comandos van con la ruta completa al intérprete del venv en vez de una variable
+`PY=...`: la shell del proyecto es fish, donde esa asignación es un error de sintaxis.
 
+```bash
 # Verificación: ninguna de estas toca el micrófono ni la red
-$PY eval/run.py                # 69 órdenes contra el baseline; sale 1 si hay regresiones
-$PY eval/test_seguridad.py     # 46 checks de los invariantes de seguridad
-$PY eval/test_audio.py         # 22 checks de la selección de dispositivo de entrada
-$PY eval/test_stt.py           # regresión del STT sobre las grabaciones reales
-$PY eval/resumen_metricas.py   # p50/p95 por etapa sobre el uso real
+.venv/bin/python eval/run.py              # 69 órdenes contra el baseline; sale 1 si hay regresiones
+.venv/bin/python eval/test_seguridad.py   # 46 checks de los invariantes de seguridad
+.venv/bin/python eval/test_audio.py       # 22 checks de la selección de dispositivo de entrada
+.venv/bin/python eval/test_stt.py         # regresión del STT sobre las grabaciones reales
+.venv/bin/python eval/resumen_metricas.py # p50/p95 por etapa sobre el uso real
 
 # Pipeline completo por texto, sin hablarle al micrófono
-$PY test_pipeline.py "Crea una carpeta llamada pruebas_nlu"
+.venv/bin/python test_pipeline.py "Crea una carpeta llamada pruebas_nlu"
 
 # Consumo de CPU en reposo
-$PY test_phase1.py
+.venv/bin/python test_phase1.py
 
 # Captura + VAD (requiere el servicio detenido)
-$PY test_mic_vad.py
+.venv/bin/python test_mic_vad.py
 ```
 
 ### Diagnóstico del wake word
@@ -329,10 +355,113 @@ micrófono interno: **38 de 40 activaciones sin ninguna transcripción**, con pu
 de hasta 0.986 — más altos que muchos aciertos reales, así que subir
 `WAKE_WORD_THRESHOLD` no alcanza. `AUDIO_GAIN` tampoco: con 1.0 o 3.0, Silero
 clasifica ese ruido como voz igual. La causa es que `oye_niri.onnx` se entrenó con
-voces sintéticas y negativos del micrófono USB, y el interno capta 6 dB más fuerte.
+voces sintéticas y negativos del micrófono USB, y el interno tiene otra respuesta.
+
+**El síntoma inverso es el mismo problema.** El 2026-09-08, con el micrófono interno,
+los logs de una mañana muestran **32 frames por encima de 0.9 y una sola activación**:
+el modelo roza el umbral en picos aislados y casi nunca sostiene los tres frames
+seguidos que exige `WAKE_WORD_TRIGGER_LEVEL`. Desde el lado del usuario eso se ve
+como "el umbral está muy alto y no me reconoce", y desde los datos es el mismo
+desajuste entre el modelo y este micrófono, no un valor mal elegido. En la única
+activación de esa mañana el VAD tampoco encontró voz (prob. máx. 0.351), y el nivel
+de captura venía cayendo: las utterances pasaron de ~-21 dBFS (28-ago a 5-sep) a
+-28/-32 dBFS (6 y 7-sep). Los controles de ALSA explican parte: `Capture` e
+`Internal Mic Boost` están al máximo, pero `Digital` está a mitad de rango (0 dB de
+30 disponibles). Subirlo recupera nivel para el VAD y el STT **y también amplifica el
+ruido que dispara los falsos positivos**, así que conviene tocarlo después de medir,
+no antes, para no mover dos variables a la vez.
+
+**Trampa: una muestra puede tener buen nivel y no contener voz.** Las dos primeras
+grabaciones de `recordings/wakeword_positivos/` marcaban -19 y -13 dBFS —niveles
+sanos— pero tenían el 70% y el 93% de su energía por debajo de 100 Hz: rumble de
+manipular la laptop. Whisper las transcribe vacías y el wake word les da 0.15, o sea
+que parecían "positivos que el modelo no reconoce" y llevaban directo a la conclusión
+"hay que reentrenar". Desde 2026-09-08, `eval/calidad_audio.py` decide por forma
+espectral (≥15% de la energía en 300-1000 Hz, ≤40% por debajo de 100 Hz):
+`grabar_wakeword.py` descarta y repite la toma, y `analizar_wakeword.py` excluye del
+análisis las muestras mudas que ya estén guardadas.
 
 El procedimiento de abajo decide **con datos** entre las dos únicas salidas: ajustar
 dos valores, o reentrenar.
+
+**Veredicto (2026-09-08): hay que reentrenar.** Con 32 positivos válidos del
+micrófono interno contra 18 falsos disparos reales, el ordenamiento da **AUC 0.307**:
+tomados un positivo y un negativo al azar, el modelo le da más puntaje al ruido el
+69% de las veces. Eso no es un umbral mal elegido —ningún umbral reordena una
+lista— y se ve en las medianas de pico, 0.961 los positivos contra 0.983 los
+negativos. La configuración de hoy (0.9 / 3 frames) detecta 7 de 32 "oye niri" y
+deja pasar 10 de 18 falsos, que es exactamente el síntoma doble que reporta el
+usuario. Y no hay adónde moverse: en toda la grilla, **ningún** par que no deje pasar
+falsos detecta un solo positivo. Endurecer a 0.9 / 4 frames baja los falsos a 2 de 18
+pero también los aciertos a 3 de 32.
+
+Se descartaron dos explicaciones más baratas antes de firmarlo:
+
+- **No es el nivel de captura.** Normalizar las grabaciones a -20 dBFS RMS mueve el
+  AUC de 0.307 a 0.316. Los positivos se grabaron a -25/-34 dBFS y el modelo los
+  sigue ordenando por debajo del ruido.
+- **No es el modelo, es a qué se parece.** Sintetizando "oye niri" con las voces
+  Piper del repo, el mismo `oye_niri.onnx` puntúa **1.000** con 3-4 frames seguidos
+  por encima de 0.9. El clasificador funciona perfecto: aprendió las voces
+  sintéticas con las que se lo entrenó, no la palabra dicha por una persona ante
+  este micrófono. Reentrenar con positivos reales es exactamente lo que falta.
+
+**Defecto encontrado de paso, ya corregido (2026-09-08):** `src/audio.py` bajaba de
+48 kHz a 16 kHz con `raw_data[::factor]`, o sea quedándose con una de cada tres
+muestras **sin filtro antialias**. Todo lo que el micrófono captaba por encima de
+8 kHz no se perdía: se plegaba sobre la banda de voz, donde ya no se distingue de la
+señal real. Como cuánto se pliega depende de la respuesta de agudos de cada
+micrófono, esto además volvía el audio del interno distinto del USB con el que se
+entrenó el wake word.
+
+Ahora el callback filtra antes de decimar, con un FIR de 161 coeficientes y corte en
+7.5 kHz: deja la banda que se pliega **53.8 dB abajo** con 0.02 dB de rizado hasta
+6 kHz, y cuesta **20 µs por bloque, 0.20% de un núcleo** (medido; el costo lo domina
+la llamada, no la cantidad de coeficientes). El estado del filtro y la fase de la
+decimación se conservan entre bloques, porque PortAudio no garantiza un tamaño de
+bloque múltiplo de 3 y perder la fase correría la rejilla de muestreo en cada borde.
+Cubierto por cinco verificaciones nuevas en `eval/test_audio.py` (27 en total), que
+no abren el micrófono: un tono de 10 kHz que antes reaparecía en 6 kHz ahora queda
+67.6 dB más abajo, y una grabación real de voz atraviesa el filtro con correlación
+0.994 y sin cambio de nivel.
+
+**Lo que sigue sin medirse** es cuánto ensuciaba realmente ese alias en este
+micrófono. No se puede sacar de las grabaciones guardadas: están todas en 16 kHz, o
+sea ya decimadas, y un alias no se deshace. Tampoco sirve la prueba con Piper — una
+voz sintética a 22 kHz casi no tiene energía por encima de 8 kHz, y por eso puntúa
+1.000 igual por los dos caminos. Hace falta capturar a 48 kHz sin decimar, que es lo
+que hace `eval/medir_alias.py`:
+
+```bash
+systemctl --user stop niri.service; .venv/bin/python eval/medir_alias.py; systemctl --user start niri.service
+```
+
+Graba dos escenas de 10 s —**ambiente** sin hablar, que es la condición de los falsos
+disparos, y **voz** diciendo "oye niri", que es la que tiene que funcionar—, las deja
+en `recordings/captura_48k/` y, sobre el mismo audio, compara los dos caminos. De
+cada escena informa qué porcentaje de la energía estaba por encima de 8 kHz, cuánto
+de eso caía sobre la banda de voz al plegarse, la relación alias/señal en dB, y los
+puntajes del wake word por los dos caminos —que es lo que dice si esa basura movía la
+decisión o no—. Las capturas se reanalizan sin micrófono con `--solo-analizar`.
+
+**Resultado (2026-09-08): el alias no era el problema.** Sobre 10 s de voz real, la
+basura plegada quedaba **37.1 dB por debajo** de la señal —solo el 0.02% de la energía
+estaba por encima de 8 kHz— y el wake word puntúa **0.997 por los dos caminos**,
+idéntico. Sobre 10 s de ambiente la relación sube a -11.2 dB, pero es el cociente
+entre dos números diminutos: la captura está a -53.6 dBFS, o sea silencio, el pico de
+agudos cae en 9.9 kHz y al plegarse aterriza en 6.1 kHz, fuera de la banda de voz. El
+puntaje del wake word se mueve de 0.595 a 0.601. Sacar el alias fue higiene necesaria
+antes de reentrenar, pero no explica ni los falsos disparos ni las detecciones
+perdidas.
+
+**Lo que sí destapó la captura de voz.** Diez segundos continuos, que es la condición
+real de producción y no la de los clips de 2 s, contienen 6 tramos con habla según
+Silero (el último cortado por el final de la grabación). Los picos del wake word,
+tramo por tramo: 0.997, 0.942, 0.876, 0.899, 0.954, 0.014. Tres pasan de 0.9 pero
+**uno solo sostiene los tres frames seguidos**, así que hay **1 detección de 6**. Es
+el mismo 22% que dieron los 32 positivos grabados por separado, ahora sin ningún
+artefacto de recorte de por medio: el veredicto de reentrenar no dependía de cómo se
+midió.
 
 ```bash
 # 1. Los negativos se juntan solos: cada disparo que no produce una orden guarda
@@ -364,18 +493,31 @@ mientras que grabaciones de puro ruido ambiente quedan en 0.15-0.40, y los dispa
 ocurren cada ~5 minutos. No es "cualquier ruido": hay algo específico y periódico del
 ambiente que el modelo confunde con "oye niri". Identificarlo es media respuesta.
 
+**Dos trampas al puntuar clips** (de `eval/analizar_wakeword.py`, 2026-09-08). El primer
+chunk devuelve 76 puntajes de golpe, porque el buffer del modelo llega pre-rellenado:
+suponer una cadencia fija desalinea cualquier eje de tiempo que se construya con ellos
+—los picos y las rachas, en cambio, no se ven afectados—. Y la última ventana termina
+donde termina el archivo, así que una palabra pegada al final nunca se ve entera: el
+mismo clip pasa de 0.002 a 0.962 agregándole 1 s de silencio a cada lado. Por eso el
+analizador rellena los clips antes de puntuarlos.
+
 ## Estado actual y pendientes
 
-El pipeline está completo y funcionando end-to-end, con 137 verificaciones
-automáticas cubriéndolo (69 casos de comprensión, 46 de seguridad, 22 de audio, más
+El pipeline está completo y funcionando end-to-end, con 142 verificaciones
+automáticas cubriéndolo (69 casos de comprensión, 46 de seguridad, 27 de audio, más
 la regresión del STT).
 
 **Lo que está abierto, por orden de importancia:**
 
-1. **Falsos positivos del wake word sin el micrófono USB.** Es lo único que hoy
-   impide usar el asistente cuando el USB no está conectado. El procedimiento para
-   resolverlo está arriba, en *Diagnóstico del wake word*, y solo necesita que
-   grabes ~30 muestras.
+1. **Reentrenar `oye_niri.onnx` con voz real de este micrófono.** Es lo único que hoy
+   impide usar el asistente cuando el USB no está conectado, y desde el 2026-09-08
+   está medido, no supuesto: ver el veredicto en *Diagnóstico del wake word*. Los
+   dos lados del conjunto de entrenamiento ya existen —32 positivos en
+   `recordings/wakeword_positivos/`, 18 negativos en `recordings/falsos_positivos/`,
+   y los negativos siguen juntándose solos—. Lo que falta es el pipeline de
+   entrenamiento, que **no está en el repo**: rearmarlo es una sesión completa.
+   La decimación sin antialias de `src/audio.py`, que habría congelado una
+   distorsión dentro del modelo nuevo, ya está corregida.
 2. **`VAD_SILENCE_TIMEOUT_MS` en 800 ms.** Es el bloque más grande de cada turno y
    es espera pura. Bajarlo a 600 son 200 ms fijos de mejora, a riesgo de cortar
    frases con pausa natural; hay que probarlo con `test_mic_vad.py`.

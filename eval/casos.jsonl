@@ -1,7 +1,7 @@
 {"id": "arch_crear_con_ubicacion", "texto": "crea una carpeta llamada tareas en clases", "esperado": {"action": "crear_carpeta", "ruta_base": "clases", "nombre": "tareas"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
 {"id": "arch_crear_sin_ubicacion", "texto": "arma una carpeta que se llame fotos", "esperado": {"action": "crear_carpeta", "ruta_base": "", "nombre": "fotos"}, "etiquetas": ["archivos", "sin_ubicacion"]}
 {"id": "arch_crear_variante", "texto": "hacéme una carpeta nueva llamada facturas en proyectos", "esperado": {"action": "crear_carpeta", "ruta_base": "proyectos", "nombre": "facturas"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
-{"id": "arch_crear_anidada", "texto": "crea una carpeta llamada parciales en clases, dentro de la carpeta matematica", "esperado": {"action": "crear_carpeta", "nombre": "parciales"}, "etiquetas": ["archivos", "anidado"]}
+{"id": "arch_crear_anidada", "texto": "crea una carpeta llamada parciales en clases, dentro de la carpeta matematica", "esperado": {"action": "crear_carpeta", "ruta_base": "clases/matematica", "nombre": "parciales"}, "etiquetas": ["archivos", "anidado"]}
 {"id": "arch_crear_archivo", "texto": "crea un archivo llamado notas.txt en proyectos", "esperado": {"action": "crear_archivo", "ruta_base": "proyectos", "nombre": "notas.txt"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
 {"id": "arch_crear_archivo_sin_ubicacion", "texto": "creame un archivo que se llame lista.md", "esperado": {"action": "crear_archivo", "ruta_base": "", "nombre": "lista.md"}, "etiquetas": ["archivos", "sin_ubicacion"]}
 {"id": "arch_crear_archivo_contenido", "texto": "crea un archivo llamado pendientes.txt en clases que diga estudiar para el final", "esperado": {"action": "crear_archivo", "ruta_base": "clases", "nombre": "pendientes.txt"}, "etiquetas": ["archivos", "contenido"]}
@@ -15,6 +15,7 @@
 {"id": "arch_listar_con_ubicacion", "texto": "lista lo que hay en proyectos", "esperado": {"action": "listar", "ruta_base": "proyectos"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
 {"id": "arch_listar_sin_ubicacion", "texto": "que archivos tengo", "esperado": {"action": "listar", "ruta_base": ""}, "etiquetas": ["archivos", "sin_ubicacion"]}
 {"id": "arch_listar_clases", "texto": "mostrame los archivos de clases", "esperado": {"action": "listar", "ruta_base": "clases"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
+{"id": "arch_listar_anidada", "texto": "mostrame los archivos de proyectos, carpeta trabajo", "esperado": {"action": "listar", "ruta_base": "proyectos/trabajo"}, "etiquetas": ["archivos", "anidado", "ubicacion_explicita"]}
 {"id": "arch_leer_con_ubicacion", "texto": "abrime el archivo config.json de proyectos y decime qué dice", "esperado": {"action": "leer", "ruta_base": "proyectos", "nombre": "config.json"}, "etiquetas": ["archivos", "ubicacion_explicita"]}
 {"id": "arch_leer_sin_ubicacion", "texto": "lee el archivo readme", "esperado": {"action": "leer", "ruta_base": "", "nombre": "readme"}, "etiquetas": ["archivos", "sin_ubicacion"]}
 {"id": "app_spotify", "texto": "abrí spotify", "esperado": {"action": "abrir_aplicacion", "nombre": "spotify"}, "etiquetas": ["apps"]}

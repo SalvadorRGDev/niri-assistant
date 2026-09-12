@@ -140,6 +140,7 @@ class NLU:
         # Métricas de la última llamada (tokens y tiempos que reporta Ollama).
         # Las consume src/metrics.py y eval/run.py; se sobrescribe en cada parse().
         self.last_metrics: dict = {}
+        self.last_error: Optional[str] = None
         # El aviso de margen de contexto se emite una sola vez por proceso: es
         # una condición estructural del prompt, no un evento por turno.
         self._margen_avisado = False
@@ -154,8 +155,8 @@ class NLU:
         Tu tarea es interpretar la orden del usuario y mapearla a UNA de las acciones
         conocidas (archivos, aplicaciones, ventanas o rutinas). Extrae la intención y
         los parámetros (nombre de archivo/carpeta/aplicación/rutina, etc.).
-        Si la intención no corresponde a ninguna acción conocida (ej. 'qué hora es'
-        — todavía no implementada), la acción debe ser 'ninguna'.
+        Si la intención no corresponde a ninguna acción conocida (ej. consultar
+        el clima o elegir una canción por nombre), la acción debe ser 'ninguna'.
 
         Sobre 'saludo', 'chiste', 'despedida': no usan ningún otro campo (todos vacíos).
         'saludo' es para saludos ("hola", "buenos días", "qué tal"). 'despedida' es
@@ -228,6 +229,12 @@ class NLU:
         preguntar la ubicación por voz cuando quede vacío. Adivinar una ubicación que
         el usuario no dijo es un error grave, incluso si te parece "obvio" cuál sería.
 
+        Si además de la raíz nombra una SUBCARPETA ("en clases, dentro de la carpeta
+        ada"), 'ruta_base' es la ruta completa desde la raíz, separada por barras y con
+        la RAÍZ SIEMPRE PRIMERO: "clases/ada". Tres errores a evitar: invertir el orden
+        ("ada/clases"), omitir la raíz ("ada" sola), o meter ahí el nombre del archivo o
+        de la carpeta de la acción — ese va SIEMPRE en 'nombre' y NUNCA en 'ruta_base'.
+
         Ejemplos (fijate que la MISMA acción aparece a veces con ubicación y a veces sin):
         Usuario: "elimina el archivo notas.txt en proyectos"
         {"action": "eliminar", "ruta_base": "proyectos", "nombre": "notas.txt"}
@@ -270,6 +277,12 @@ class NLU:
 
         Usuario: "lista lo que hay en proyectos"
         {"action": "listar", "ruta_base": "proyectos"}
+
+        Usuario: "crea una carpeta llamada resumenes en proyectos, dentro de la carpeta borradores"
+        {"action": "crear_carpeta", "ruta_base": "proyectos/borradores", "nombre": "resumenes"}
+
+        Usuario: "lista lo que hay en clases, dentro de la carpeta ada"
+        {"action": "listar", "ruta_base": "clases/ada"}
 
         Usuario: "que archivos tengo"
         {"action": "listar", "ruta_base": ""}
@@ -439,6 +452,7 @@ class NLU:
             logger.info(f"Contexto: prompt {usados}/{NUM_CTX} tokens ({libre:.0%} libre).")
 
     def parse(self, text: str) -> FileAction:
+        self.last_error = None
         logger.info(f"Parsing NLU intent for text: '{text}'")
         try:
             response = self.client.chat(
@@ -469,5 +483,6 @@ class NLU:
             return action
         except Exception as e:
             logger.error(f"Failed to parse NLU intent: {e}")
+            self.last_error = type(e).__name__
             self.last_metrics = {}
             return FileAction(action="ninguna", ruta_base="")
